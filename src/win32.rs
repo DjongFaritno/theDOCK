@@ -20,9 +20,10 @@ use windows_sys::Win32::Graphics::Dwm::{
 use windows_sys::Win32::Graphics::Gdi::{
     BeginPaint, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, CombineRgn, CreateFontW, CreateRectRgn,
     CreateRoundRectRgn, CreateSolidBrush, DEFAULT_CHARSET, DEFAULT_GUI_FONT, DEFAULT_PITCH,
-    DeleteObject, EndPaint, FW_MEDIUM, FillRect, GetStockObject, HDC, InvalidateRect,
-    OUT_DEFAULT_PRECIS, PAINTSTRUCT, RGN_OR, RoundRect, SelectObject, SetBkMode, SetTextColor,
-    SetWindowRgn, TRANSPARENT, TextOutW,
+    DeleteObject, EndPaint, FW_MEDIUM, FillRect, GRADIENT_FILL_RECT_V, GRADIENT_RECT,
+    GetStockObject, GradientFill, HDC, InvalidateRect, NULL_PEN, OUT_DEFAULT_PRECIS, PAINTSTRUCT,
+    RGN_OR, RestoreDC, RoundRect, SaveDC, SelectClipRgn, SelectObject, SetBkMode, SetTextColor,
+    SetWindowRgn, TRANSPARENT, TRIVERTEX, TextOutW,
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
@@ -58,6 +59,7 @@ const CLASS_NAME: &str = "theDOCK_prototype";
 const DOCK_MAX_WIDTH: i32 = 1120;
 const DOCK_HEIGHT: i32 = 66;
 const TRAY_HEIGHT: i32 = 128;
+const SETTINGS_HEIGHT: i32 = 400;
 const TIMER_ID: usize = 1;
 const AUTO_HIDE_TIMER_ID: usize = 2;
 const MENU_HOTKEY_ID: i32 = 1;
@@ -87,6 +89,7 @@ struct App {
     settings: Settings,
     settings_path: PathBuf,
     tray_open: bool,
+    settings_open: bool,
     icon: HICON,
     running: Vec<RunningWindow>,
     hits: Vec<HitBox>,
@@ -111,6 +114,8 @@ enum HitAction {
     Running(usize),
     MoreApps,
     Tray,
+    Settings,
+    ToggleSetting(Setting),
     Calendar,
     MusicPrev,
     MusicPlay,
@@ -134,6 +139,16 @@ impl HitBox {
 }
 
 impl App {
+    fn panel_height(&self) -> i32 {
+        if self.settings_open {
+            SETTINGS_HEIGHT
+        } else if self.tray_open {
+            TRAY_HEIGHT
+        } else {
+            0
+        }
+    }
+
     fn sample_cpu(&mut self) {
         unsafe {
             let mut idle: FILETIME = zeroed();
@@ -297,6 +312,7 @@ pub fn run() -> Result<(), String> {
             settings,
             settings_path,
             tray_open: false,
+            settings_open: false,
             icon,
             running: Vec::new(),
             hits: Vec::new(),
@@ -458,9 +474,17 @@ unsafe extern "system" fn window_proc(
                     Some(HitAction::MoreApps) => show_overflow_menu(hwnd, app),
                     Some(HitAction::Tray) => {
                         app.tray_open = !app.tray_open;
+                        app.settings_open = false;
                         position_window(hwnd, app);
                         InvalidateRect(hwnd, null(), 0);
                     }
+                    Some(HitAction::Settings) => {
+                        app.settings_open = !app.settings_open;
+                        app.tray_open = false;
+                        position_window(hwnd, app);
+                        InvalidateRect(hwnd, null(), 0);
+                    }
+                    Some(HitAction::ToggleSetting(setting)) => toggle_setting(hwnd, app, setting),
                     Some(HitAction::Calendar) => {
                         app.menu_open = true;
                         show_calendar(hwnd);
@@ -494,7 +518,10 @@ unsafe extern "system" fn window_proc(
                 0
             }
             WM_HOTKEY => {
-                show_settings_menu(hwnd, app);
+                app.settings_open = !app.settings_open;
+                app.tray_open = false;
+                position_window(hwnd, app);
+                InvalidateRect(hwnd, null(), 0);
                 0
             }
             WM_DROPFILES => {
@@ -503,6 +530,7 @@ unsafe extern "system" fn window_proc(
             }
             WM_KEYDOWN if wparam == VK_ESCAPE as usize => {
                 app.tray_open = false;
+                app.settings_open = false;
                 position_window(hwnd, app);
                 InvalidateRect(hwnd, null(), 0);
                 0
@@ -603,42 +631,46 @@ unsafe fn show_settings_menu(hwnd: HWND, app: &mut App) {
         } else if let Some((_, setting, _)) =
             SETTINGS_MENU.iter().find(|(key, _, _)| *key == id as u32)
         {
-            app.settings.toggle(*setting);
-            if *setting == Setting::HideTaskbar {
-                if app.settings.hide_taskbar {
-                    match TaskbarGuard::hide() {
-                        Ok(guard) => app.taskbar = guard,
-                        Err(error) => {
-                            app.settings.hide_taskbar = false;
-                            show_error(&error);
-                        }
-                    }
-                } else {
-                    app.taskbar = None;
-                }
-            }
-            if *setting == Setting::Tray && !app.settings.tray {
-                app.tray_open = false;
-                position_window(hwnd, app);
-            }
-            if *setting == Setting::Glass || *setting == Setting::LightGlass {
-                apply_glass(hwnd, app);
-            }
-            if *setting == Setting::DockTop {
-                position_window(hwnd, app);
-            }
-            if *setting == Setting::AutoHide {
-                app.auto_hidden = false;
-                app.last_hover = Instant::now();
-                if app.settings.auto_hide {
-                    SetTimer(hwnd, AUTO_HIDE_TIMER_ID, 500, None);
-                } else {
-                    KillTimer(hwnd, AUTO_HIDE_TIMER_ID);
-                }
-                position_window(hwnd, app);
-            }
-            save_settings(hwnd, app);
+            toggle_setting(hwnd, app, *setting);
         }
+    }
+}
+
+unsafe fn toggle_setting(hwnd: HWND, app: &mut App, setting: Setting) {
+    app.settings.toggle(setting);
+    if setting == Setting::HideTaskbar {
+        if app.settings.hide_taskbar {
+            match TaskbarGuard::hide() {
+                Ok(guard) => app.taskbar = guard,
+                Err(error) => {
+                    app.settings.hide_taskbar = false;
+                    show_error(&error);
+                }
+            }
+        } else {
+            app.taskbar = None;
+        }
+    }
+    if setting == Setting::Tray && !app.settings.tray {
+        app.tray_open = false;
+    }
+    if setting == Setting::Glass || setting == Setting::LightGlass {
+        unsafe { apply_glass(hwnd, app) };
+    }
+    if setting == Setting::AutoHide {
+        app.auto_hidden = false;
+        app.last_hover = Instant::now();
+        unsafe {
+            if app.settings.auto_hide {
+                SetTimer(hwnd, AUTO_HIDE_TIMER_ID, 500, None);
+            } else {
+                KillTimer(hwnd, AUTO_HIDE_TIMER_ID);
+            }
+        }
+    }
+    unsafe {
+        position_window(hwnd, app);
+        save_settings(hwnd, app);
     }
 }
 
@@ -876,7 +908,12 @@ unsafe fn apply_glass(hwnd: HWND, app: &mut App) {
 }
 
 unsafe fn auto_hide_tick(hwnd: HWND, app: &mut App) {
-    if !app.settings.auto_hide || app.auto_hidden || app.tray_open || app.menu_open {
+    if !app.settings.auto_hide
+        || app.auto_hidden
+        || app.tray_open
+        || app.settings_open
+        || app.menu_open
+    {
         return;
     }
     unsafe {
@@ -902,11 +939,12 @@ unsafe fn auto_hide_tick(hwnd: HWND, app: &mut App) {
 unsafe fn position_window(hwnd: HWND, app: &App) {
     unsafe {
         let hidden = app.settings.auto_hide && app.auto_hidden;
-        let panel = app.tray_open && !hidden;
+        let panel_height = if hidden { 0 } else { app.panel_height() };
+        let panel = panel_height > 0;
         let height = if hidden {
             4
         } else {
-            DOCK_HEIGHT + if panel { TRAY_HEIGHT } else { 0 }
+            DOCK_HEIGHT + panel_height
         };
         let screen_width = GetSystemMetrics(SM_CXSCREEN);
         let width = (screen_width - 32).clamp(560, app.settings.dock_width.pixels());
@@ -918,7 +956,7 @@ unsafe fn position_window(hwnd: HWND, app: &App) {
         };
         SetWindowPos(hwnd, HWND_TOPMOST, x, y, width, height, SWP_NOACTIVATE);
         let dock_top = if panel && !app.settings.dock_top {
-            TRAY_HEIGHT
+            panel_height
         } else {
             0
         };
@@ -934,11 +972,12 @@ unsafe fn position_window(hwnd: HWND, app: &App) {
                 } else {
                     0
                 };
+                let panel_width = if app.settings_open { 570 } else { 320 };
                 let tray = CreateRoundRectRgn(
-                    width - 320,
+                    width - panel_width,
                     panel_y,
                     width,
-                    panel_y + TRAY_HEIGHT + 20,
+                    panel_y + panel_height + 20,
                     32,
                     32,
                 );
@@ -1014,8 +1053,8 @@ unsafe fn paint(hwnd: HWND, app: &mut App) {
         SetTextColor(dc, text_color);
 
         let width = area.right;
-        let dock_top = if app.tray_open && !app.settings.dock_top {
-            TRAY_HEIGHT
+        let dock_top = if app.panel_height() > 0 && !app.settings.dock_top {
+            app.panel_height()
         } else {
             0
         };
@@ -1036,10 +1075,16 @@ unsafe fn paint(hwnd: HWND, app: &mut App) {
         } else {
             label(dc, 24, dock_top + 25, "theDOCK");
         }
+        capsule(dc, 116, dock_top + 16, 148, dock_top + 50, button_color);
+        label(dc, 122, dock_top + 23, "⚙");
+        app.hits.push(HitBox {
+            rect: rect(116, dock_top + 16, 148, dock_top + 50),
+            action: HitAction::Settings,
+        });
 
         if app.settings.start {
             capsule(dc, 158, dock_top + 12, 240, dock_top + 54, button_color);
-            label(dc, 178, dock_top + 26, "Start");
+            label(dc, 171, dock_top + 25, "⊞ Start");
             app.hits.push(HitBox {
                 rect: rect(158, dock_top + 12, 240, dock_top + 54),
                 action: HitAction::Start,
@@ -1070,6 +1115,14 @@ unsafe fn paint(hwnd: HWND, app: &mut App) {
                 "AC".into()
             };
             right -= 82;
+            capsule(
+                dc,
+                right - 5,
+                dock_top + 12,
+                right + 78,
+                dock_top + 54,
+                button_color,
+            );
             label(dc, right, dock_top + 25, &value);
             right -= 6;
         }
@@ -1082,6 +1135,14 @@ unsafe fn paint(hwnd: HWND, app: &mut App) {
                 "RAM ?".into()
             };
             right -= 88;
+            capsule(
+                dc,
+                right - 5,
+                dock_top + 12,
+                right + 84,
+                dock_top + 54,
+                button_color,
+            );
             label(dc, right, dock_top + 25, &value);
             right -= 6;
         }
@@ -1090,6 +1151,14 @@ unsafe fn paint(hwnd: HWND, app: &mut App) {
             let value = app
                 .cpu_percent
                 .map_or("CPU ?".into(), |value| format!("CPU {value}%"));
+            capsule(
+                dc,
+                right - 5,
+                dock_top + 12,
+                right + 73,
+                dock_top + 54,
+                button_color,
+            );
             label(dc, right, dock_top + 25, &value);
             right -= 6;
         }
@@ -1150,6 +1219,14 @@ unsafe fn paint(hwnd: HWND, app: &mut App) {
             }
             right -= 8;
         }
+
+        let divider = CreateSolidBrush(if app.settings.light_glass {
+            rgb(139, 168, 210)
+        } else {
+            rgb(105, 145, 216)
+        });
+        FillRect(dc, &rect(250, dock_top + 16, 251, dock_top + 50), divider);
+        DeleteObject(divider);
 
         let mut x = 260;
         let total = (if app.settings.pinned_apps {
@@ -1276,6 +1353,9 @@ unsafe fn paint(hwnd: HWND, app: &mut App) {
                 "Ikon aplikasi lain: belum tersedia",
             );
         }
+        if app.settings_open {
+            draw_settings_panel(dc, app, width, surface_color, button_color, text_color);
+        }
         SelectObject(dc, old_font);
         if font != GetStockObject(DEFAULT_GUI_FONT) {
             DeleteObject(font);
@@ -1301,6 +1381,87 @@ unsafe fn draw_pin_icon(dc: HDC, target: &str, x: i32, y: i32, label_text: &str)
             let short: String = label_text.chars().take(2).collect();
             label(dc, x + 3, y + 8, &short);
         }
+    }
+}
+
+unsafe fn draw_settings_panel(
+    dc: HDC,
+    app: &mut App,
+    width: i32,
+    surface_color: u32,
+    button_color: u32,
+    text_color: u32,
+) {
+    let left = width - 560;
+    let top = if app.settings.dock_top {
+        DOCK_HEIGHT - 16
+    } else {
+        4
+    };
+    unsafe {
+        capsule(
+            dc,
+            left,
+            top,
+            width - 8,
+            top + SETTINGS_HEIGHT - 2,
+            surface_color,
+        );
+        label(dc, left + 20, top + 20, "Pengaturan theDOCK");
+        capsule(dc, width - 54, top + 12, width - 22, top + 44, button_color);
+        label(dc, width - 44, top + 19, "×");
+        app.hits.push(HitBox {
+            rect: rect(width - 54, top + 12, width - 22, top + 44),
+            action: HitAction::Settings,
+        });
+        let line = CreateSolidBrush(if app.settings.light_glass {
+            rgb(156, 181, 216)
+        } else {
+            rgb(87, 120, 174)
+        });
+        FillRect(dc, &rect(left + 18, top + 50, width - 24, top + 51), line);
+        DeleteObject(line);
+        for (index, (_, setting, label_text)) in SETTINGS_MENU.iter().enumerate() {
+            let column = index / 10;
+            let row = index % 10;
+            let x = left + 20 + column as i32 * 266;
+            let y = top + 64 + row as i32 * 30;
+            SetTextColor(dc, text_color);
+            label(dc, x, y + 3, label_text);
+            let enabled = app.settings.enabled(*setting);
+            let switch_left = x + 209;
+            let switch_color = if enabled {
+                rgb(45, 120, 236)
+            } else if app.settings.light_glass {
+                rgb(168, 184, 208)
+            } else {
+                rgb(63, 79, 110)
+            };
+            capsule(dc, switch_left, y, switch_left + 38, y + 22, switch_color);
+            let knob_left = if enabled {
+                switch_left + 20
+            } else {
+                switch_left + 3
+            };
+            capsule(
+                dc,
+                knob_left,
+                y + 3,
+                knob_left + 15,
+                y + 19,
+                rgb(245, 249, 255),
+            );
+            app.hits.push(HitBox {
+                rect: rect(x, y - 2, x + 252, y + 25),
+                action: HitAction::ToggleSetting(*setting),
+            });
+        }
+        label(
+            dc,
+            left + 20,
+            top + 369,
+            "Klik kanan dock untuk ukuran dan keluar",
+        );
     }
 }
 
@@ -1342,12 +1503,61 @@ unsafe fn send_key(key: u16) {
 
 unsafe fn capsule(dc: HDC, left: i32, top: i32, right: i32, bottom: i32, color: u32) {
     unsafe {
-        let brush = CreateSolidBrush(color);
-        let previous = SelectObject(dc, brush);
-        RoundRect(dc, left, top, right, bottom, 28, 28);
-        SelectObject(dc, previous);
-        DeleteObject(brush);
+        if right - left < 4 || bottom - top < 4 {
+            return;
+        }
+        let border = CreateSolidBrush(tint(color, if bottom - top > 55 { 72 } else { 29 }));
+        let previous_brush = SelectObject(dc, border);
+        let previous_pen = SelectObject(dc, GetStockObject(NULL_PEN));
+        let radius = (bottom - top).min(34);
+        RoundRect(dc, left, top, right, bottom, radius, radius);
+        SelectObject(dc, previous_brush);
+        SelectObject(dc, previous_pen);
+        DeleteObject(border);
+
+        let clip = CreateRoundRectRgn(left + 1, top + 1, right - 1, bottom - 1, radius, radius);
+        if clip.is_null() {
+            return;
+        }
+        let saved = SaveDC(dc);
+        if saved != 0 {
+            SelectClipRgn(dc, clip);
+            let vertices = [
+                gradient_vertex(left, top, tint(color, 14)),
+                gradient_vertex(right, bottom, tint(color, -10)),
+            ];
+            let rectangle = GRADIENT_RECT {
+                UpperLeft: 0,
+                LowerRight: 1,
+            };
+            GradientFill(
+                dc,
+                vertices.as_ptr(),
+                vertices.len() as u32,
+                (&rectangle as *const GRADIENT_RECT).cast::<c_void>(),
+                1,
+                GRADIENT_FILL_RECT_V,
+            );
+            RestoreDC(dc, saved);
+        }
+        DeleteObject(clip);
     }
+}
+
+fn gradient_vertex(x: i32, y: i32, color: u32) -> TRIVERTEX {
+    TRIVERTEX {
+        x,
+        y,
+        Red: ((color & 0xff) as u16) << 8,
+        Green: (((color >> 8) & 0xff) as u16) << 8,
+        Blue: (((color >> 16) & 0xff) as u16) << 8,
+        Alpha: 0,
+    }
+}
+
+fn tint(color: u32, adjustment: i16) -> u32 {
+    let channel = |shift| (((color >> shift) & 0xffu32) as i16 + adjustment).clamp(0, 255) as u8;
+    rgb(channel(0), channel(8), channel(16))
 }
 
 unsafe fn label(dc: HDC, x: i32, y: i32, text: &str) {

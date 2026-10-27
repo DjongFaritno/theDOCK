@@ -8,11 +8,15 @@ Prototipe ditulis dengan Rust dan Win32 native. Yang sudah dikodekan:
 - Seret `.exe` atau pintasan dari Explorer ke dock untuk memin aplikasi. Klik kiri untuk membuka; klik kanan untuk menggeser urutan atau melepas pin. Klik ikon jendela berjalan untuk berpindah ke jendela tersebut.
 - Klik tanggal untuk melihat kalender sederhana. Tiga tombol media mengirim perintah lagu sebelumnya, putar/jeda, dan lagu berikutnya ke Windows. Judul lagu belum tersedia.
 - Posisi dock dapat dipindah ke atas/bawah. Menu menyediakan tiga pilihan lebar, sembunyi otomatis dengan jalur pembuka di tepi layar, serta kaca terang/gelap.
-- Menu pengaturan melalui klik kanan atau `Ctrl+Alt+D`. Setiap komponen yang tampil memiliki sakelar sendiri. Pengaturan disimpan di `%APPDATA%\theDOCK\settings.json`.
+- Panel pengaturan menyatu dengan dock dan dibuka lewat ikon roda gigi atau `Ctrl+Alt+D`. Setiap komponen yang tampil memiliki sakelar sendiri. Klik kanan masih menyediakan menu cadangan, pilihan lebar, dan keluar. Pengaturan disimpan di `%APPDATA%\theDOCK\settings.json`.
 - Pengaturan untuk menyembunyikan taskbar aktif secara bawaan. Taskbar yang semula terlihat dipulihkan saat keluar normal. Executable pengawas terpisah mencoba memulihkannya jika aplikasi utama berhenti mendadak. Jika pengawas gagal mulai, taskbar tetap terlihat dan dock masih dapat digunakan.
 - Panel Tray terbuka dalam jendela dock yang sama. Volume turun/naik, mute, dan jalan pintas ke pengaturan jaringan/Bluetooth tersedia dengan sakelar masing-masing. Ikon tray milik aplikasi lain masih belum tersedia karena jalur integrasinya belum tervalidasi.
 - Efek kaca mencoba memakai *DWM transient system backdrop* Windows 11. Seluruh area dock kini selalu dicat gelap dengan transparansi ringan agar teks tetap terbaca pada tema Windows terang maupun gelap.
 - Ikon theDOCK tersedia sebagai [PNG](../assets/thedock-icon.png) dan [ICO](../assets/thedock.ico), serta ditanam ke executable Windows.
+
+### Perombakan tampilan 0.4.0
+
+Umpan balik pengguna menyatakan UI prototipe masih sangat jauh dari acuan Lumabar dan dari mockup theDOCK. Dock sebelumnya berupa kapsul solid dengan tombol teks, sementara Settings adalah menu Windows biasa. Versi ini menambahkan gradasi dan tepi terang pada permukaan, kartu CPU/RAM/baterai, pemisah area aplikasi, serta panel Settings dengan sakelar yang digambar langsung di jendela dock. Ini langkah visual pertama; hasil build masih perlu dibandingkan lewat screenshot Windows sebelum dianggap sesuai acuan. Efek kaca saat ini belum melakukan pembiasan wallpaper.
 
 ### Perbaikan tampilan 0.1.1
 
@@ -30,7 +34,7 @@ cargo build --locked --release --bins
 .\target\release\thedock.exe
 ```
 
-`rust-toolchain.toml` menentukan versi Rust. Klik kanan dock atau tekan `Ctrl+Alt+D` untuk membuka sakelar fitur dan pilihan keluar. Tombol Start membuka menu Start Windows. Menu `Keluar dari theDOCK` memulihkan taskbar. Artefak GitHub Actions berisi `thedock.exe`, `thedock-watchdog.exe`, dan alat diagnostik tray; simpan dua executable pertama dalam satu folder. Lihat [panduan probe tray](tray-feasibility.md) bila menguji integrasi ikon aplikasi lain.
+`rust-toolchain.toml` menentukan versi Rust. Klik roda gigi atau tekan `Ctrl+Alt+D` untuk membuka panel sakelar fitur; klik kanan dock untuk pilihan lebar dan keluar. Tombol Start membuka menu Start Windows. Menu `Keluar dari theDOCK` memulihkan taskbar. Artefak GitHub Actions berisi `thedock.exe`, `thedock-watchdog.exe`, dan alat diagnostik tray; simpan dua executable pertama dalam satu folder. Lihat [panduan probe tray](tray-feasibility.md) bila menguji integrasi ikon aplikasi lain.
 
 Di Linux, unit test dan pemeriksaan kode Windows dapat dijalankan tanpa menjalankan UI:
 
