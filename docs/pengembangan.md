@@ -24,6 +24,10 @@ Screenshot Lumabar yang dikirim pengguna menunjukkan bilah hampir selebar layar 
 
 Versi 0.4.1 mengubah kedua palet menjadi kaca gelap, mengurangi lebar area logo/Start agar lebih banyak ikon muat, memakai ikon generik Windows ketika ikon aplikasi tak dapat dibaca, mengambil ikon dari berkas proses untuk jendela yang tak menyediakan ikon kelas, menggabungkan tanggal dan jam dalam satu kartu, dan menggabungkan kontrol media dalam satu bidang. Ini masih memerlukan screenshot Windows baru untuk menilai warna, kontras, ukuran ikon, dan hasil backdrop DWM yang sesungguhnya. Widget sesi, agenda, dan cuaca pada contoh Lumabar belum merupakan fitur theDOCK.
 
+### Umpan balik screenshot 0.4.1
+
+Screenshot Windows 0.4.1 memperlihatkan ikon aplikasi, kartu status, dan palet gelap sudah tampil. Namun ikon aplikasi theDOCK sendiri jatuh menjadi huruf `D`, kedua sudut luar tampak terang, dan taskbar Windows terlihat di bawah dock. Penyebab ikon adalah pemanggilan `LoadIconW` dengan nilai pointer 2 untuk sumber daya bernomor 1; versi 0.4.2 memakai ID yang benar. Kedua tema sekarang menggunakan mode backdrop gelap, dan radius region jendela diselaraskan dengan permukaan dock agar sudut terang tidak tersisa. Penyebab taskbar terlihat masih perlu dipastikan dari konfigurasi pengguna: pengawas harus berada di folder yang sama dan sakelar sembunyikan taskbar harus aktif. Pemulihan taskbar tetap didahulukan daripada menyembunyikannya tanpa pengawas.
+
 ### Perbaikan tampilan 0.1.1
 
 Uji pengguna menunjukkan kapsul dock putih dengan tombol Start dan Tray terlihat, tetapi teks utama nyaris hilang. Prototipe sebelumnya memperluas bingkai DWM ke seluruh area klien lalu melewatkan pengecatan latar saat efek kaca aktif. Perbaikan ini menghapus perluasan bingkai tersebut, mewarnai permukaan dock secara eksplisit, memakai teks terang di atas latar gelap, dan memperbesar font. Kontras sekarang tidak bergantung pada warna backdrop Windows. Hasil akhirnya tetap perlu dilihat pada mesin Windows 11.

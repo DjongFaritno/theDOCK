@@ -282,8 +282,9 @@ pub fn run() -> Result<(), String> {
         if module.is_null() {
             return Err("GetModuleHandleW gagal".into());
         }
-        // MAKEINTRESOURCEW(1): winresource embeds the application icon as ID 1.
-        let icon = LoadIconW(module, std::ptr::dangling::<u16>());
+        // MAKEINTRESOURCEW(1): integer resource identifiers are encoded as a
+        // pointer value, not as a pointer to an integer in memory.
+        let icon = LoadIconW(module, std::ptr::without_provenance::<u16>(1));
         let window_class = WNDCLASSW {
             lpfnWndProc: Some(window_proc),
             hInstance: module,
@@ -874,7 +875,9 @@ unsafe fn show_calendar(hwnd: HWND) {
 
 unsafe fn apply_glass(hwnd: HWND, app: &mut App) {
     unsafe {
-        let dark_mode: i32 = if app.settings.light_glass { 0 } else { 1 };
+        // Both glass palettes are dark. A light DWM backdrop left bright
+        // corners around the dark custom-painted surface on Windows 11.
+        let dark_mode: i32 = 1;
         DwmSetWindowAttribute(
             hwnd,
             DWMWA_USE_IMMERSIVE_DARK_MODE as u32,
@@ -967,7 +970,7 @@ unsafe fn position_window(hwnd: HWND, app: &App) {
         let region = if hidden {
             CreateRectRgn(0, 0, width, 4)
         } else {
-            CreateRoundRectRgn(0, dock_top, width, dock_top + DOCK_HEIGHT, 66, 66)
+            CreateRoundRectRgn(0, dock_top, width, dock_top + DOCK_HEIGHT, 38, 38)
         };
         if !region.is_null() {
             if panel {
