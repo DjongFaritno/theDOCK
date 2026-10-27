@@ -18,9 +18,34 @@ pub struct Settings {
     pub ram: bool,
     pub battery: bool,
     pub tray: bool,
+    pub tray_volume: bool,
+    pub tray_network: bool,
+    pub tray_bluetooth: bool,
     pub glass: bool,
+    pub light_glass: bool,
     pub hide_taskbar: bool,
+    pub dock_top: bool,
+    pub auto_hide: bool,
+    pub dock_width: DockWidth,
     pub pins: Vec<PinnedApp>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DockWidth {
+    Narrow,
+    #[default]
+    Normal,
+    Wide,
+}
+
+impl DockWidth {
+    pub fn pixels(self) -> i32 {
+        match self {
+            Self::Narrow => 900,
+            Self::Normal => 1120,
+            Self::Wide => 1320,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -43,8 +68,15 @@ impl Default for Settings {
             ram: true,
             battery: true,
             tray: true,
+            tray_volume: true,
+            tray_network: true,
+            tray_bluetooth: true,
             glass: true,
+            light_glass: false,
             hide_taskbar: true,
+            dock_top: false,
+            auto_hide: false,
+            dock_width: DockWidth::Normal,
             pins: vec![PinnedApp {
                 label: "Explorer".into(),
                 target: "explorer.exe".into(),
@@ -66,8 +98,14 @@ pub enum Setting {
     Ram,
     Battery,
     Tray,
+    TrayVolume,
+    TrayNetwork,
+    TrayBluetooth,
     Glass,
+    LightGlass,
     HideTaskbar,
+    DockTop,
+    AutoHide,
 }
 
 impl Settings {
@@ -84,8 +122,14 @@ impl Settings {
             Setting::Ram => &mut self.ram,
             Setting::Battery => &mut self.battery,
             Setting::Tray => &mut self.tray,
+            Setting::TrayVolume => &mut self.tray_volume,
+            Setting::TrayNetwork => &mut self.tray_network,
+            Setting::TrayBluetooth => &mut self.tray_bluetooth,
             Setting::Glass => &mut self.glass,
+            Setting::LightGlass => &mut self.light_glass,
             Setting::HideTaskbar => &mut self.hide_taskbar,
+            Setting::DockTop => &mut self.dock_top,
+            Setting::AutoHide => &mut self.auto_hide,
         };
         *value = !*value;
     }
@@ -103,8 +147,14 @@ impl Settings {
             Setting::Ram => self.ram,
             Setting::Battery => self.battery,
             Setting::Tray => self.tray,
+            Setting::TrayVolume => self.tray_volume,
+            Setting::TrayNetwork => self.tray_network,
+            Setting::TrayBluetooth => self.tray_bluetooth,
             Setting::Glass => self.glass,
+            Setting::LightGlass => self.light_glass,
             Setting::HideTaskbar => self.hide_taskbar,
+            Setting::DockTop => self.dock_top,
+            Setting::AutoHide => self.auto_hide,
         }
     }
 
@@ -183,6 +233,9 @@ mod tests {
         assert!(decoded.hide_taskbar);
         assert!(decoded.tray);
         assert!(decoded.start);
+        assert!(decoded.tray_volume);
+        assert!(!decoded.auto_hide);
+        assert_eq!(decoded.dock_width, super::DockWidth::Normal);
     }
 
     #[test]

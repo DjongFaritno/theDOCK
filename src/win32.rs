@@ -7,7 +7,8 @@ use std::mem::{size_of, zeroed};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::ptr::{null, null_mut};
-use thedock::{Setting, Settings};
+use std::time::{Duration, Instant};
+use thedock::{DockWidth, Setting, Settings};
 use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_ALREADY_EXISTS, FILETIME, GetLastError, HANDLE, HWND, LPARAM, POINT, RECT,
     SYSTEMTIME,
@@ -17,7 +18,7 @@ use windows_sys::Win32::Graphics::Dwm::{
     DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute,
 };
 use windows_sys::Win32::Graphics::Gdi::{
-    BeginPaint, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, CombineRgn, CreateFontW,
+    BeginPaint, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, CombineRgn, CreateFontW, CreateRectRgn,
     CreateRoundRectRgn, CreateSolidBrush, DEFAULT_CHARSET, DEFAULT_GUI_FONT, DEFAULT_PITCH,
     DeleteObject, EndPaint, FW_MEDIUM, FillRect, GetStockObject, HDC, InvalidateRect,
     OUT_DEFAULT_PRECIS, PAINTSTRUCT, RGN_OR, RoundRect, SelectObject, SetBkMode, SetTextColor,
@@ -32,6 +33,7 @@ use windows_sys::Win32::System::Threading::{CreateMutexW, GetCurrentProcessId, G
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, MOD_ALT, MOD_CONTROL,
     RegisterHotKey, SendInput, UnregisterHotKey, VK_ESCAPE, VK_LWIN, VK_MEDIA_PLAY_PAUSE,
+    VK_VOLUME_DOWN, VK_VOLUME_MUTE, VK_VOLUME_UP,
 };
 use windows_sys::Win32::UI::Shell::{
     DragAcceptFiles, DragFinish, DragQueryFileW, HDROP, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON,
@@ -41,15 +43,15 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DI_NORMAL, DefWindowProcW, DestroyIcon,
     DestroyMenu, DestroyWindow, DispatchMessageW, DrawIconEx, EnumWindows, GCLP_HICON,
     GCLP_HICONSM, GW_OWNER, GWLP_USERDATA, GetClassLongPtrW, GetClassNameW, GetClientRect,
-    GetCursorPos, GetMessageW, GetSystemMetrics, GetWindow, GetWindowLongPtrW, GetWindowTextW,
-    GetWindowThreadProcessId, HICON, HWND_TOPMOST, IsIconic, IsWindowVisible, KillTimer, LWA_ALPHA,
-    LoadIconW, MB_ICONERROR, MB_OK, MF_CHECKED, MF_SEPARATOR, MF_STRING, MSG, MessageBoxW,
-    PostQuitMessage, RegisterClassW, SM_CXSCREEN, SM_CYSCREEN, SW_HIDE, SW_SHOW, SWP_NOACTIVATE,
-    SetForegroundWindow, SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW, SetWindowPos,
-    ShowWindow, TPM_RETURNCMD, TrackPopupMenu, TranslateMessage, WM_CLOSE, WM_DESTROY,
-    WM_DISPLAYCHANGE, WM_DROPFILES, WM_ERASEBKGND, WM_HOTKEY, WM_KEYDOWN, WM_LBUTTONUP, WM_PAINT,
-    WM_RBUTTONUP, WM_SETTINGCHANGE, WM_TIMER, WNDCLASSW, WS_EX_LAYERED, WS_EX_TOOLWINDOW,
-    WS_EX_TOPMOST, WS_POPUP,
+    GetCursorPos, GetMessageW, GetSystemMetrics, GetWindow, GetWindowLongPtrW, GetWindowRect,
+    GetWindowTextW, GetWindowThreadProcessId, HICON, HWND_TOPMOST, IsIconic, IsWindowVisible,
+    KillTimer, LWA_ALPHA, LoadIconW, MB_ICONERROR, MB_OK, MF_CHECKED, MF_SEPARATOR, MF_STRING, MSG,
+    MessageBoxW, PostQuitMessage, RegisterClassW, SM_CXSCREEN, SM_CYSCREEN, SW_HIDE, SW_SHOW,
+    SWP_NOACTIVATE, SetForegroundWindow, SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW,
+    SetWindowPos, ShowWindow, TPM_RETURNCMD, TrackPopupMenu, TranslateMessage, WM_CLOSE,
+    WM_DESTROY, WM_DISPLAYCHANGE, WM_DROPFILES, WM_ERASEBKGND, WM_HOTKEY, WM_KEYDOWN, WM_LBUTTONUP,
+    WM_MOUSEMOVE, WM_PAINT, WM_RBUTTONUP, WM_SETTINGCHANGE, WM_TIMER, WNDCLASSW, WS_EX_LAYERED,
+    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
 const CLASS_NAME: &str = "theDOCK_prototype";
@@ -57,6 +59,7 @@ const DOCK_MAX_WIDTH: i32 = 1120;
 const DOCK_HEIGHT: i32 = 66;
 const TRAY_HEIGHT: i32 = 128;
 const TIMER_ID: usize = 1;
+const AUTO_HIDE_TIMER_ID: usize = 2;
 const MENU_HOTKEY_ID: i32 = 1;
 const SETTINGS_MENU: &[(u32, Setting, &str)] = &[
     (8, Setting::Start, "Tombol Start"),
@@ -70,8 +73,14 @@ const SETTINGS_MENU: &[(u32, Setting, &str)] = &[
     (3, Setting::Ram, "RAM"),
     (4, Setting::Battery, "Baterai"),
     (5, Setting::Tray, "Tombol Tray"),
+    (17, Setting::TrayVolume, "Tray: volume"),
+    (18, Setting::TrayNetwork, "Tray: jaringan"),
+    (19, Setting::TrayBluetooth, "Tray: Bluetooth"),
     (6, Setting::Glass, "Efek kaca"),
+    (14, Setting::LightGlass, "Kaca terang"),
     (7, Setting::HideTaskbar, "Sembunyikan taskbar"),
+    (15, Setting::DockTop, "Posisi di atas"),
+    (16, Setting::AutoHide, "Sembunyi otomatis"),
 ];
 
 struct App {
@@ -83,6 +92,9 @@ struct App {
     hits: Vec<HitBox>,
     cpu_sample: Option<(u64, u64)>,
     cpu_percent: Option<u32>,
+    auto_hidden: bool,
+    last_hover: Instant,
+    menu_open: bool,
     taskbar: Option<TaskbarGuard>,
 }
 
@@ -101,6 +113,11 @@ enum HitAction {
     Tray,
     Calendar,
     Music,
+    VolumeDown,
+    VolumeMute,
+    VolumeUp,
+    Network,
+    Bluetooth,
 }
 
 struct HitBox {
@@ -271,17 +288,23 @@ pub fn run() -> Result<(), String> {
             hits: Vec::new(),
             cpu_sample: None,
             cpu_percent: None,
+            auto_hidden: false,
+            last_hover: Instant::now(),
+            menu_open: false,
             taskbar: None,
         });
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, (&mut *app as *mut App) as isize);
         apply_glass(hwnd, &mut app);
         app.running = running_windows(hwnd);
         app.sample_cpu();
-        position_window(hwnd, false);
+        position_window(hwnd, &app);
         ShowWindow(hwnd, SW_SHOW);
         DragAcceptFiles(hwnd, 1);
         RegisterHotKey(hwnd, MENU_HOTKEY_ID, MOD_CONTROL | MOD_ALT, b'D' as u32);
         SetTimer(hwnd, TIMER_ID, 10_000, None);
+        if app.settings.auto_hide {
+            SetTimer(hwnd, AUTO_HIDE_TIMER_ID, 500, None);
+        }
 
         if app.settings.hide_taskbar {
             // If the watcher cannot start, keep Windows' taskbar available.
@@ -421,11 +444,20 @@ unsafe extern "system" fn window_proc(
                     Some(HitAction::MoreApps) => show_overflow_menu(hwnd, app),
                     Some(HitAction::Tray) => {
                         app.tray_open = !app.tray_open;
-                        position_window(hwnd, app.tray_open);
+                        position_window(hwnd, app);
                         InvalidateRect(hwnd, null(), 0);
                     }
-                    Some(HitAction::Calendar) => show_calendar(hwnd),
+                    Some(HitAction::Calendar) => {
+                        app.menu_open = true;
+                        show_calendar(hwnd);
+                        app.menu_open = false;
+                    }
                     Some(HitAction::Music) => send_media_key(),
+                    Some(HitAction::VolumeDown) => send_key(VK_VOLUME_DOWN),
+                    Some(HitAction::VolumeMute) => send_key(VK_VOLUME_MUTE),
+                    Some(HitAction::VolumeUp) => send_key(VK_VOLUME_UP),
+                    Some(HitAction::Network) => launch_uri(hwnd, "ms-settings:network-status"),
+                    Some(HitAction::Bluetooth) => launch_uri(hwnd, "ms-settings:bluetooth"),
                     None => {}
                 }
                 0
@@ -455,14 +487,27 @@ unsafe extern "system" fn window_proc(
             }
             WM_KEYDOWN if wparam == VK_ESCAPE as usize => {
                 app.tray_open = false;
-                position_window(hwnd, false);
+                position_window(hwnd, app);
                 InvalidateRect(hwnd, null(), 0);
                 0
             }
+            WM_MOUSEMOVE => {
+                app.last_hover = Instant::now();
+                if app.auto_hidden {
+                    app.auto_hidden = false;
+                    position_window(hwnd, app);
+                    InvalidateRect(hwnd, null(), 0);
+                }
+                0
+            }
             WM_TIMER => {
-                app.running = running_windows(hwnd);
-                app.sample_cpu();
-                InvalidateRect(hwnd, null(), 0);
+                if wparam == AUTO_HIDE_TIMER_ID {
+                    auto_hide_tick(hwnd, app);
+                } else {
+                    app.running = running_windows(hwnd);
+                    app.sample_cpu();
+                    InvalidateRect(hwnd, null(), 0);
+                }
                 0
             }
             WM_SETTINGCHANGE => {
@@ -470,7 +515,7 @@ unsafe extern "system" fn window_proc(
                 0
             }
             WM_DISPLAYCHANGE => {
-                position_window(hwnd, app.tray_open);
+                position_window(hwnd, app);
                 0
             }
             WM_CLOSE => {
@@ -481,6 +526,7 @@ unsafe extern "system" fn window_proc(
                 DragAcceptFiles(hwnd, 0);
                 UnregisterHotKey(hwnd, MENU_HOTKEY_ID);
                 KillTimer(hwnd, TIMER_ID);
+                KillTimer(hwnd, AUTO_HIDE_TIMER_ID);
                 app.taskbar = None;
                 SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
                 PostQuitMessage(0);
@@ -507,14 +553,37 @@ unsafe fn show_settings_menu(hwnd: HWND, app: &mut App) {
             AppendMenuW(menu, flags, *id as usize, wide(label).as_ptr());
         }
         AppendMenuW(menu, MF_SEPARATOR, 0, null());
+        for (id, width, label) in [
+            (301, DockWidth::Narrow, "Lebar kecil"),
+            (302, DockWidth::Normal, "Lebar sedang"),
+            (303, DockWidth::Wide, "Lebar besar"),
+        ] {
+            let checked = if app.settings.dock_width == width {
+                MF_CHECKED
+            } else {
+                0
+            };
+            AppendMenuW(menu, MF_STRING | checked, id, wide(label).as_ptr());
+        }
+        AppendMenuW(menu, MF_SEPARATOR, 0, null());
         AppendMenuW(menu, MF_STRING, 100, wide("Keluar dari theDOCK").as_ptr());
         let mut point: POINT = zeroed();
         GetCursorPos(&mut point);
         SetForegroundWindow(hwnd);
+        app.menu_open = true;
         let id = TrackPopupMenu(menu, TPM_RETURNCMD, point.x, point.y, 0, hwnd, null());
+        app.menu_open = false;
         DestroyMenu(menu);
         if id == 100 {
             DestroyWindow(hwnd);
+        } else if (301..=303).contains(&id) {
+            app.settings.dock_width = match id {
+                301 => DockWidth::Narrow,
+                303 => DockWidth::Wide,
+                _ => DockWidth::Normal,
+            };
+            position_window(hwnd, app);
+            save_settings(hwnd, app);
         } else if let Some((_, setting, _)) =
             SETTINGS_MENU.iter().find(|(key, _, _)| *key == id as u32)
         {
@@ -534,15 +603,25 @@ unsafe fn show_settings_menu(hwnd: HWND, app: &mut App) {
             }
             if *setting == Setting::Tray && !app.settings.tray {
                 app.tray_open = false;
-                position_window(hwnd, false);
+                position_window(hwnd, app);
             }
-            if *setting == Setting::Glass {
+            if *setting == Setting::Glass || *setting == Setting::LightGlass {
                 apply_glass(hwnd, app);
             }
-            if let Err(error) = app.settings.save(&app.settings_path) {
-                show_error(&format!("Pengaturan gagal disimpan: {error}"));
+            if *setting == Setting::DockTop {
+                position_window(hwnd, app);
             }
-            InvalidateRect(hwnd, null(), 0);
+            if *setting == Setting::AutoHide {
+                app.auto_hidden = false;
+                app.last_hover = Instant::now();
+                if app.settings.auto_hide {
+                    SetTimer(hwnd, AUTO_HIDE_TIMER_ID, 500, None);
+                } else {
+                    KillTimer(hwnd, AUTO_HIDE_TIMER_ID);
+                }
+                position_window(hwnd, app);
+            }
+            save_settings(hwnd, app);
         }
     }
 }
@@ -564,7 +643,9 @@ unsafe fn show_pin_menu(hwnd: HWND, app: &mut App, index: usize) {
         let mut point: POINT = zeroed();
         GetCursorPos(&mut point);
         SetForegroundWindow(hwnd);
+        app.menu_open = true;
         let action = TrackPopupMenu(menu, TPM_RETURNCMD, point.x, point.y, 0, hwnd, null());
+        app.menu_open = false;
         DestroyMenu(menu);
         let changed = match action {
             201 => {
@@ -582,7 +663,7 @@ unsafe fn show_pin_menu(hwnd: HWND, app: &mut App, index: usize) {
     }
 }
 
-unsafe fn show_overflow_menu(hwnd: HWND, app: &App) {
+unsafe fn show_overflow_menu(hwnd: HWND, app: &mut App) {
     unsafe {
         let menu = CreatePopupMenu();
         if menu.is_null() {
@@ -605,7 +686,9 @@ unsafe fn show_overflow_menu(hwnd: HWND, app: &App) {
         let mut point: POINT = zeroed();
         GetCursorPos(&mut point);
         SetForegroundWindow(hwnd);
+        app.menu_open = true;
         let action = TrackPopupMenu(menu, TPM_RETURNCMD, point.x, point.y, 0, hwnd, null());
+        app.menu_open = false;
         DestroyMenu(menu);
         match action {
             1_000..=1_099 => launch_pin(hwnd, app, (action - 1_000) as usize),
@@ -630,6 +713,22 @@ unsafe fn launch_pin(hwnd: HWND, app: &App, index: usize) {
         );
         if result as isize <= 32 {
             show_error(&format!("Tidak dapat membuka {}", pin.label));
+        }
+    }
+}
+
+unsafe fn launch_uri(hwnd: HWND, uri: &str) {
+    unsafe {
+        let result = ShellExecuteW(
+            hwnd,
+            wide("open").as_ptr(),
+            wide(uri).as_ptr(),
+            null(),
+            null(),
+            SW_SHOW,
+        );
+        if result as isize <= 32 {
+            show_error("Pengaturan Windows tidak dapat dibuka");
         }
     }
 }
@@ -723,7 +822,7 @@ unsafe fn show_calendar(hwnd: HWND) {
 
 unsafe fn apply_glass(hwnd: HWND, app: &mut App) {
     unsafe {
-        let dark_mode: i32 = 1;
+        let dark_mode: i32 = if app.settings.light_glass { 0 } else { 1 };
         DwmSetWindowAttribute(
             hwnd,
             DWMWA_USE_IMMERSIVE_DARK_MODE as u32,
@@ -760,25 +859,73 @@ unsafe fn apply_glass(hwnd: HWND, app: &mut App) {
     }
 }
 
-unsafe fn position_window(hwnd: HWND, tray_open: bool) {
+unsafe fn auto_hide_tick(hwnd: HWND, app: &mut App) {
+    if !app.settings.auto_hide || app.auto_hidden || app.tray_open || app.menu_open {
+        return;
+    }
     unsafe {
-        let height = DOCK_HEIGHT + if tray_open { TRAY_HEIGHT } else { 0 };
+        let mut cursor: POINT = zeroed();
+        let mut window: RECT = zeroed();
+        if GetCursorPos(&mut cursor) == 0 || GetWindowRect(hwnd, &mut window) == 0 {
+            return;
+        }
+        if cursor.x >= window.left - 4
+            && cursor.x < window.right + 4
+            && cursor.y >= window.top - 4
+            && cursor.y < window.bottom + 4
+        {
+            app.last_hover = Instant::now();
+        } else if app.last_hover.elapsed() >= Duration::from_millis(1200) {
+            app.auto_hidden = true;
+            position_window(hwnd, app);
+            InvalidateRect(hwnd, null(), 0);
+        }
+    }
+}
+
+unsafe fn position_window(hwnd: HWND, app: &App) {
+    unsafe {
+        let hidden = app.settings.auto_hide && app.auto_hidden;
+        let panel = app.tray_open && !hidden;
+        let height = if hidden {
+            4
+        } else {
+            DOCK_HEIGHT + if panel { TRAY_HEIGHT } else { 0 }
+        };
         let screen_width = GetSystemMetrics(SM_CXSCREEN);
-        let width = (screen_width - 32).clamp(560, DOCK_MAX_WIDTH);
+        let width = (screen_width - 32).clamp(560, app.settings.dock_width.pixels());
         let x = (screen_width - width) / 2;
-        let y = GetSystemMetrics(SM_CYSCREEN) - height - 16;
+        let y = if app.settings.dock_top {
+            if hidden { 0 } else { 16 }
+        } else {
+            GetSystemMetrics(SM_CYSCREEN) - height - if hidden { 0 } else { 16 }
+        };
         SetWindowPos(hwnd, HWND_TOPMOST, x, y, width, height, SWP_NOACTIVATE);
-        let region = CreateRoundRectRgn(
-            0,
-            if tray_open { TRAY_HEIGHT } else { 0 },
-            width,
-            height,
-            66,
-            66,
-        );
+        let dock_top = if panel && !app.settings.dock_top {
+            TRAY_HEIGHT
+        } else {
+            0
+        };
+        let region = if hidden {
+            CreateRectRgn(0, 0, width, 4)
+        } else {
+            CreateRoundRectRgn(0, dock_top, width, dock_top + DOCK_HEIGHT, 66, 66)
+        };
         if !region.is_null() {
-            if tray_open {
-                let tray = CreateRoundRectRgn(width - 320, 0, width, TRAY_HEIGHT + 20, 32, 32);
+            if panel {
+                let panel_y = if app.settings.dock_top {
+                    DOCK_HEIGHT - 20
+                } else {
+                    0
+                };
+                let tray = CreateRoundRectRgn(
+                    width - 320,
+                    panel_y,
+                    width,
+                    panel_y + TRAY_HEIGHT + 20,
+                    32,
+                    32,
+                );
                 if !tray.is_null() {
                     CombineRgn(region, region, tray, RGN_OR);
                     DeleteObject(tray);
@@ -797,9 +944,34 @@ unsafe fn paint(hwnd: HWND, app: &mut App) {
         let dc = BeginPaint(hwnd, &mut paint);
         let mut area: RECT = zeroed();
         GetClientRect(hwnd, &mut area);
-        let background = CreateSolidBrush(rgb(18, 29, 51));
+        let (background_color, surface_color, button_color, pin_color, running_color, text_color) =
+            if app.settings.light_glass {
+                (
+                    rgb(226, 236, 250),
+                    rgb(213, 228, 248),
+                    rgb(179, 208, 241),
+                    rgb(192, 216, 245),
+                    rgb(171, 203, 237),
+                    rgb(24, 43, 70),
+                )
+            } else {
+                (
+                    rgb(18, 29, 51),
+                    rgb(31, 49, 83),
+                    rgb(50, 75, 118),
+                    rgb(44, 64, 101),
+                    rgb(39, 80, 116),
+                    rgb(245, 247, 255),
+                )
+            };
+        let background = CreateSolidBrush(background_color);
         FillRect(dc, &area, background);
         DeleteObject(background);
+        app.hits.clear();
+        if app.settings.auto_hide && app.auto_hidden {
+            EndPaint(hwnd, &paint);
+            return;
+        }
         let font = CreateFontW(
             -17,
             0,
@@ -823,19 +995,15 @@ unsafe fn paint(hwnd: HWND, app: &mut App) {
         };
         let old_font = SelectObject(dc, font);
         SetBkMode(dc, TRANSPARENT as i32);
-        SetTextColor(dc, rgb(245, 247, 255));
+        SetTextColor(dc, text_color);
 
-        app.hits.clear();
         let width = area.right;
-        let dock_top = if app.tray_open { TRAY_HEIGHT } else { 0 };
-        capsule(
-            dc,
-            4,
-            dock_top + 4,
-            width - 4,
-            dock_top + 62,
-            rgb(31, 49, 83),
-        );
+        let dock_top = if app.tray_open && !app.settings.dock_top {
+            TRAY_HEIGHT
+        } else {
+            0
+        };
+        capsule(dc, 4, dock_top + 4, width - 4, dock_top + 62, surface_color);
         if !app.icon.is_null() {
             DrawIconEx(
                 dc,
@@ -854,7 +1022,7 @@ unsafe fn paint(hwnd: HWND, app: &mut App) {
         }
 
         if app.settings.start {
-            capsule(dc, 158, dock_top + 12, 240, dock_top + 54, rgb(50, 75, 118));
+            capsule(dc, 158, dock_top + 12, 240, dock_top + 54, button_color);
             label(dc, 178, dock_top + 26, "Start");
             app.hits.push(HitBox {
                 rect: rect(158, dock_top + 12, 240, dock_top + 54),
@@ -865,14 +1033,7 @@ unsafe fn paint(hwnd: HWND, app: &mut App) {
         let mut right = width - 18;
         if app.settings.tray {
             let left = right - 76;
-            capsule(
-                dc,
-                left,
-                dock_top + 12,
-                right,
-                dock_top + 54,
-                rgb(50, 75, 118),
-            );
+            capsule(dc, left, dock_top + 12, right, dock_top + 54, button_color);
             label(dc, left + 13, dock_top + 26, "Tray ^");
             app.hits.push(HitBox {
                 rect: rect(left, dock_top + 12, right, dock_top + 54),
@@ -952,7 +1113,7 @@ unsafe fn paint(hwnd: HWND, app: &mut App) {
                 dock_top + 12,
                 right + 68,
                 dock_top + 54,
-                rgb(50, 75, 118),
+                button_color,
             );
             label(dc, right + 11, dock_top + 26, "Media");
             app.hits.push(HitBox {
@@ -984,14 +1145,7 @@ unsafe fn paint(hwnd: HWND, app: &mut App) {
                 if shown >= visible_capacity {
                     break;
                 }
-                capsule(
-                    dc,
-                    x,
-                    dock_top + 10,
-                    x + 42,
-                    dock_top + 56,
-                    rgb(44, 64, 101),
-                );
+                capsule(dc, x, dock_top + 10, x + 42, dock_top + 56, pin_color);
                 draw_pin_icon(dc, &pin.target, x + 6, dock_top + 17, &pin.label);
                 app.hits.push(HitBox {
                     rect: rect(x, dock_top + 10, x + 42, dock_top + 56),
@@ -1006,14 +1160,7 @@ unsafe fn paint(hwnd: HWND, app: &mut App) {
                 if shown >= visible_capacity {
                     break;
                 }
-                capsule(
-                    dc,
-                    x,
-                    dock_top + 10,
-                    x + 42,
-                    dock_top + 56,
-                    rgb(39, 80, 116),
-                );
+                capsule(dc, x, dock_top + 10, x + 42, dock_top + 56, running_color);
                 let icon = GetClassLongPtrW(window.hwnd as HWND, GCLP_HICONSM);
                 let icon = if icon == 0 {
                     GetClassLongPtrW(window.hwnd as HWND, GCLP_HICON)
@@ -1045,14 +1192,7 @@ unsafe fn paint(hwnd: HWND, app: &mut App) {
             }
         }
         if total > shown && capacity > 0 {
-            capsule(
-                dc,
-                x,
-                dock_top + 10,
-                x + 42,
-                dock_top + 56,
-                rgb(50, 75, 118),
-            );
+            capsule(dc, x, dock_top + 10, x + 42, dock_top + 56, button_color);
             label(dc, x + 13, dock_top + 25, "···");
             app.hits.push(HitBox {
                 rect: rect(x, dock_top + 10, x + 42, dock_top + 56),
@@ -1063,17 +1203,50 @@ unsafe fn paint(hwnd: HWND, app: &mut App) {
         }
 
         if app.tray_open {
+            let panel_top = if app.settings.dock_top {
+                DOCK_HEIGHT - 16
+            } else {
+                4
+            };
             capsule(
                 dc,
                 width - 310,
-                4,
+                panel_top,
                 width - 8,
-                TRAY_HEIGHT - 2,
-                rgb(31, 49, 83),
+                panel_top + TRAY_HEIGHT - 2,
+                surface_color,
             );
-            label(dc, width - 286, 27, "Panel Tray");
-            label(dc, width - 286, 57, "Ikon aplikasi lain belum tersedia.");
-            label(dc, width - 286, 79, "Prototipe Windows diperlukan.");
+            label(dc, width - 286, panel_top + 23, "Panel Tray");
+            let mut controls = Vec::new();
+            if app.settings.tray_volume {
+                controls.extend([
+                    (HitAction::VolumeDown, "Vol-"),
+                    (HitAction::VolumeMute, "Mute"),
+                    (HitAction::VolumeUp, "Vol+"),
+                ]);
+            }
+            if app.settings.tray_network {
+                controls.push((HitAction::Network, "Net"));
+            }
+            if app.settings.tray_bluetooth {
+                controls.push((HitAction::Bluetooth, "BT"));
+            }
+            for (index, (action, label_text)) in controls.into_iter().enumerate() {
+                let x = width - 298 + index as i32 * 55;
+                let top = panel_top + 40;
+                capsule(dc, x, top, x + 50, top + 40, button_color);
+                label(dc, x + 6, top + 13, label_text);
+                app.hits.push(HitBox {
+                    rect: rect(x, top, x + 50, top + 40),
+                    action,
+                });
+            }
+            label(
+                dc,
+                width - 286,
+                panel_top + 100,
+                "Ikon aplikasi lain: belum tersedia",
+            );
         }
         SelectObject(dc, old_font);
         if font != GetStockObject(DEFAULT_GUI_FONT) {
