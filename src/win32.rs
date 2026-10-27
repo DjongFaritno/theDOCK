@@ -32,8 +32,8 @@ use windows_sys::Win32::System::SystemInformation::{
 use windows_sys::Win32::System::Threading::{CreateMutexW, GetCurrentProcessId, GetSystemTimes};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, MOD_ALT, MOD_CONTROL,
-    RegisterHotKey, SendInput, UnregisterHotKey, VK_ESCAPE, VK_LWIN, VK_MEDIA_PLAY_PAUSE,
-    VK_VOLUME_DOWN, VK_VOLUME_MUTE, VK_VOLUME_UP,
+    RegisterHotKey, SendInput, UnregisterHotKey, VK_ESCAPE, VK_LWIN, VK_MEDIA_NEXT_TRACK,
+    VK_MEDIA_PLAY_PAUSE, VK_MEDIA_PREV_TRACK, VK_VOLUME_DOWN, VK_VOLUME_MUTE, VK_VOLUME_UP,
 };
 use windows_sys::Win32::UI::Shell::{
     DragAcceptFiles, DragFinish, DragQueryFileW, HDROP, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON,
@@ -112,7 +112,9 @@ enum HitAction {
     MoreApps,
     Tray,
     Calendar,
-    Music,
+    MusicPrev,
+    MusicPlay,
+    MusicNext,
     VolumeDown,
     VolumeMute,
     VolumeUp,
@@ -464,7 +466,9 @@ unsafe extern "system" fn window_proc(
                         show_calendar(hwnd);
                         app.menu_open = false;
                     }
-                    Some(HitAction::Music) => send_media_key(),
+                    Some(HitAction::MusicPrev) => send_key(VK_MEDIA_PREV_TRACK),
+                    Some(HitAction::MusicPlay) => send_key(VK_MEDIA_PLAY_PAUSE),
+                    Some(HitAction::MusicNext) => send_key(VK_MEDIA_NEXT_TRACK),
                     Some(HitAction::VolumeDown) => send_key(VK_VOLUME_DOWN),
                     Some(HitAction::VolumeMute) => send_key(VK_VOLUME_MUTE),
                     Some(HitAction::VolumeUp) => send_key(VK_VOLUME_UP),
@@ -1117,21 +1121,33 @@ unsafe fn paint(hwnd: HWND, app: &mut App) {
             );
             right -= 6;
         }
-        if app.settings.music && right - 80 >= reserve_apps {
-            right -= 72;
-            capsule(
-                dc,
-                right,
-                dock_top + 12,
-                right + 68,
-                dock_top + 54,
-                button_color,
-            );
-            label(dc, right + 11, dock_top + 26, "Media");
-            app.hits.push(HitBox {
-                rect: rect(right, dock_top + 12, right + 68, dock_top + 54),
-                action: HitAction::Music,
-            });
+        if app.settings.music && right - 126 >= reserve_apps {
+            right -= 118;
+            for (offset, label_text, action) in [
+                (0, "<<", HitAction::MusicPrev),
+                (40, ">", HitAction::MusicPlay),
+                (80, ">>", HitAction::MusicNext),
+            ] {
+                let left = right + offset;
+                capsule(
+                    dc,
+                    left,
+                    dock_top + 12,
+                    left + 38,
+                    dock_top + 54,
+                    button_color,
+                );
+                label(
+                    dc,
+                    left + if offset == 40 { 13 } else { 7 },
+                    dock_top + 26,
+                    label_text,
+                );
+                app.hits.push(HitBox {
+                    rect: rect(left, dock_top + 12, left + 38, dock_top + 54),
+                    action,
+                });
+            }
             right -= 8;
         }
 
@@ -1299,10 +1315,6 @@ fn rect(left: i32, top: i32, right: i32, bottom: i32) -> RECT {
 
 unsafe fn open_start_menu() {
     unsafe { send_key(VK_LWIN) };
-}
-
-unsafe fn send_media_key() {
-    unsafe { send_key(VK_MEDIA_PLAY_PAUSE) };
 }
 
 unsafe fn send_key(key: u16) {

@@ -6,7 +6,7 @@ Prototipe ditulis dengan Rust dan Win32 native. Yang sudah dikodekan:
 
 - Dock di layar utama dengan tombol Start, aplikasi yang dipin, jendela berjalan, jam, tanggal, CPU, RAM, dan baterai. Ruang ikon menyesuaikan lebar layar; menu `···` memberi akses ke aplikasi yang tidak muat.
 - Seret `.exe` atau pintasan dari Explorer ke dock untuk memin aplikasi. Klik kiri untuk membuka; klik kanan untuk menggeser urutan atau melepas pin. Klik ikon jendela berjalan untuk berpindah ke jendela tersebut.
-- Klik tanggal untuk melihat kalender sederhana. Tombol Media mengirim perintah putar/jeda ke Windows; judul lagu dan kontrol lagu berikutnya belum tersedia.
+- Klik tanggal untuk melihat kalender sederhana. Tiga tombol media mengirim perintah lagu sebelumnya, putar/jeda, dan lagu berikutnya ke Windows. Judul lagu belum tersedia.
 - Posisi dock dapat dipindah ke atas/bawah. Menu menyediakan tiga pilihan lebar, sembunyi otomatis dengan jalur pembuka di tepi layar, serta kaca terang/gelap.
 - Menu pengaturan melalui klik kanan atau `Ctrl+Alt+D`. Setiap komponen yang tampil memiliki sakelar sendiri. Pengaturan disimpan di `%APPDATA%\theDOCK\settings.json`.
 - Pengaturan untuk menyembunyikan taskbar aktif secara bawaan. Taskbar yang semula terlihat dipulihkan saat keluar normal. Executable pengawas terpisah mencoba memulihkannya jika aplikasi utama berhenti mendadak. Jika pengawas gagal mulai, taskbar tetap terlihat dan dock masih dapat digunakan.
