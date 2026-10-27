@@ -18,6 +18,12 @@ Prototipe ditulis dengan Rust dan Win32 native. Yang sudah dikodekan:
 
 Umpan balik pengguna menyatakan UI prototipe masih sangat jauh dari acuan Lumabar dan dari mockup theDOCK. Dock sebelumnya berupa kapsul solid dengan tombol teks, sementara Settings adalah menu Windows biasa. Versi ini menambahkan gradasi dan tepi terang pada permukaan, kartu CPU/RAM/baterai, pemisah area aplikasi, serta panel Settings dengan sakelar yang digambar langsung di jendela dock. Ini langkah visual pertama; hasil build masih perlu dibandingkan lewat screenshot Windows sebelum dianggap sesuai acuan. Efek kaca saat ini belum melakukan pembiasan wallpaper.
 
+### Perbandingan screenshot dan perbaikan 0.4.1
+
+Screenshot Lumabar yang dikirim pengguna menunjukkan bilah hampir selebar layar dengan permukaan kaca hitam, deretan ikon aplikasi tanpa label teks, indikator aplikasi aktif, widget ringkas, kontrol tray kecil, dan tanggal/jam yang dikelompokkan di ujung kanan. Screenshot theDOCK yang dikirim masih memakai bilah biru muda, beberapa ikon jatuh menjadi singkatan teks, serta jam, tanggal, CPU, RAM, baterai, dan tombol media terpisah seperti teks biasa. Screenshot theDOCK itu tampak berasal dari build sebelum 0.4.0 karena belum memiliki tombol roda gigi.
+
+Versi 0.4.1 mengubah kedua palet menjadi kaca gelap, mengurangi lebar area logo/Start agar lebih banyak ikon muat, memakai ikon generik Windows ketika ikon aplikasi tak dapat dibaca, mengambil ikon dari berkas proses untuk jendela yang tak menyediakan ikon kelas, menggabungkan tanggal dan jam dalam satu kartu, dan menggabungkan kontrol media dalam satu bidang. Ini masih memerlukan screenshot Windows baru untuk menilai warna, kontras, ukuran ikon, dan hasil backdrop DWM yang sesungguhnya. Widget sesi, agenda, dan cuaca pada contoh Lumabar belum merupakan fitur theDOCK.
+
 ### Perbaikan tampilan 0.1.1
 
 Uji pengguna menunjukkan kapsul dock putih dengan tombol Start dan Tray terlihat, tetapi teks utama nyaris hilang. Prototipe sebelumnya memperluas bingkai DWM ke seluruh area klien lalu melewatkan pengecatan latar saat efek kaca aktif. Perbaikan ini menghapus perluasan bingkai tersebut, mewarnai permukaan dock secara eksplisit, memakai teks terang di atas latar gelap, dan memperbesar font. Kontras sekarang tidak bergantung pada warna backdrop Windows. Hasil akhirnya tetap perlu dilihat pada mesin Windows 11.

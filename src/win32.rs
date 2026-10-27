@@ -20,39 +20,43 @@ use windows_sys::Win32::Graphics::Dwm::{
 use windows_sys::Win32::Graphics::Gdi::{
     BeginPaint, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, CombineRgn, CreateFontW, CreateRectRgn,
     CreateRoundRectRgn, CreateSolidBrush, DEFAULT_CHARSET, DEFAULT_GUI_FONT, DEFAULT_PITCH,
-    DeleteObject, EndPaint, FW_MEDIUM, FillRect, GRADIENT_FILL_RECT_V, GRADIENT_RECT,
+    DeleteObject, EndPaint, FW_MEDIUM, FW_SEMIBOLD, FillRect, GRADIENT_FILL_RECT_V, GRADIENT_RECT,
     GetStockObject, GradientFill, HDC, InvalidateRect, NULL_PEN, OUT_DEFAULT_PRECIS, PAINTSTRUCT,
     RGN_OR, RestoreDC, RoundRect, SaveDC, SelectClipRgn, SelectObject, SetBkMode, SetTextColor,
     SetWindowRgn, TRANSPARENT, TRIVERTEX, TextOutW,
 };
+use windows_sys::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_NORMAL, SearchPathW};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
 use windows_sys::Win32::System::SystemInformation::{
     GetLocalTime, GlobalMemoryStatusEx, MEMORYSTATUSEX,
 };
-use windows_sys::Win32::System::Threading::{CreateMutexW, GetCurrentProcessId, GetSystemTimes};
+use windows_sys::Win32::System::Threading::{
+    CreateMutexW, GetCurrentProcessId, GetSystemTimes, OpenProcess,
+    PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
+};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, MOD_ALT, MOD_CONTROL,
     RegisterHotKey, SendInput, UnregisterHotKey, VK_ESCAPE, VK_LWIN, VK_MEDIA_NEXT_TRACK,
     VK_MEDIA_PLAY_PAUSE, VK_MEDIA_PREV_TRACK, VK_VOLUME_DOWN, VK_VOLUME_MUTE, VK_VOLUME_UP,
 };
 use windows_sys::Win32::UI::Shell::{
-    DragAcceptFiles, DragFinish, DragQueryFileW, HDROP, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON,
-    SHGetFileInfoW, ShellExecuteW,
+    DragAcceptFiles, DragFinish, DragQueryFileW, HDROP, SHFILEINFOW, SHGFI_ICON,
+    SHGFI_USEFILEATTRIBUTES, SHGetFileInfoW, ShellExecuteW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DI_NORMAL, DefWindowProcW, DestroyIcon,
     DestroyMenu, DestroyWindow, DispatchMessageW, DrawIconEx, EnumWindows, GCLP_HICON,
     GCLP_HICONSM, GW_OWNER, GWLP_USERDATA, GetClassLongPtrW, GetClassNameW, GetClientRect,
     GetCursorPos, GetMessageW, GetSystemMetrics, GetWindow, GetWindowLongPtrW, GetWindowRect,
-    GetWindowTextW, GetWindowThreadProcessId, HICON, HWND_TOPMOST, IsIconic, IsWindowVisible,
-    KillTimer, LWA_ALPHA, LoadIconW, MB_ICONERROR, MB_OK, MF_CHECKED, MF_SEPARATOR, MF_STRING, MSG,
-    MessageBoxW, PostQuitMessage, RegisterClassW, SM_CXSCREEN, SM_CYSCREEN, SW_HIDE, SW_SHOW,
-    SWP_NOACTIVATE, SetForegroundWindow, SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW,
-    SetWindowPos, ShowWindow, TPM_RETURNCMD, TrackPopupMenu, TranslateMessage, WM_CLOSE,
-    WM_DESTROY, WM_DISPLAYCHANGE, WM_DROPFILES, WM_ERASEBKGND, WM_HOTKEY, WM_KEYDOWN, WM_LBUTTONUP,
-    WM_MOUSEMOVE, WM_PAINT, WM_RBUTTONUP, WM_SETTINGCHANGE, WM_TIMER, WNDCLASSW, WS_EX_LAYERED,
-    WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    GetWindowTextW, GetWindowThreadProcessId, HICON, HWND_TOPMOST, IDI_APPLICATION, IsIconic,
+    IsWindowVisible, KillTimer, LWA_ALPHA, LoadIconW, MB_ICONERROR, MB_OK, MF_CHECKED,
+    MF_SEPARATOR, MF_STRING, MSG, MessageBoxW, PostQuitMessage, RegisterClassW, SM_CXSCREEN,
+    SM_CYSCREEN, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SetForegroundWindow, SetLayeredWindowAttributes,
+    SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow, TPM_RETURNCMD, TrackPopupMenu,
+    TranslateMessage, WM_CLOSE, WM_DESTROY, WM_DISPLAYCHANGE, WM_DROPFILES, WM_ERASEBKGND,
+    WM_HOTKEY, WM_KEYDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_PAINT, WM_RBUTTONUP, WM_SETTINGCHANGE,
+    WM_TIMER, WNDCLASSW, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
 const CLASS_NAME: &str = "theDOCK_prototype";
@@ -1002,21 +1006,21 @@ unsafe fn paint(hwnd: HWND, app: &mut App) {
         let (background_color, surface_color, button_color, pin_color, running_color, text_color) =
             if app.settings.light_glass {
                 (
-                    rgb(226, 236, 250),
-                    rgb(213, 228, 248),
-                    rgb(179, 208, 241),
-                    rgb(192, 216, 245),
-                    rgb(171, 203, 237),
-                    rgb(24, 43, 70),
+                    rgb(21, 31, 48),
+                    rgb(35, 51, 75),
+                    rgb(47, 67, 97),
+                    rgb(42, 61, 91),
+                    rgb(49, 75, 111),
+                    rgb(242, 247, 255),
                 )
             } else {
                 (
-                    rgb(18, 29, 51),
-                    rgb(31, 49, 83),
-                    rgb(50, 75, 118),
-                    rgb(44, 64, 101),
-                    rgb(39, 80, 116),
-                    rgb(245, 247, 255),
+                    rgb(5, 9, 18),
+                    rgb(12, 19, 33),
+                    rgb(20, 30, 49),
+                    rgb(18, 28, 46),
+                    rgb(22, 37, 60),
+                    rgb(246, 249, 255),
                 )
             };
         let background = CreateSolidBrush(background_color);
@@ -1062,7 +1066,7 @@ unsafe fn paint(hwnd: HWND, app: &mut App) {
         if !app.icon.is_null() {
             DrawIconEx(
                 dc,
-                18,
+                16,
                 dock_top + 17,
                 app.icon,
                 32,
@@ -1071,31 +1075,53 @@ unsafe fn paint(hwnd: HWND, app: &mut App) {
                 null_mut(),
                 DI_NORMAL,
             );
-            label(dc, 57, dock_top + 25, "theDOCK");
         } else {
-            label(dc, 24, dock_top + 25, "theDOCK");
+            label(dc, 20, dock_top + 25, "D");
         }
-        capsule(dc, 116, dock_top + 16, 148, dock_top + 50, button_color);
-        label(dc, 122, dock_top + 23, "⚙");
+        capsule(dc, 56, dock_top + 16, 90, dock_top + 50, button_color);
+        label(dc, 63, dock_top + 23, "⚙");
         app.hits.push(HitBox {
-            rect: rect(116, dock_top + 16, 148, dock_top + 50),
+            rect: rect(56, dock_top + 16, 90, dock_top + 50),
             action: HitAction::Settings,
         });
 
         if app.settings.start {
-            capsule(dc, 158, dock_top + 12, 240, dock_top + 54, button_color);
-            label(dc, 171, dock_top + 25, "⊞ Start");
+            capsule(dc, 100, dock_top + 12, 144, dock_top + 54, button_color);
+            label(dc, 112, dock_top + 24, "⊞");
             app.hits.push(HitBox {
-                rect: rect(158, dock_top + 12, 240, dock_top + 54),
+                rect: rect(100, dock_top + 12, 144, dock_top + 54),
                 action: HitAction::Start,
             });
         }
 
         let mut right = width - 18;
+        if app.settings.clock || app.settings.date {
+            let card_width = if app.settings.clock && app.settings.date {
+                174
+            } else {
+                92
+            };
+            right -= card_width;
+            draw_clock_card(
+                dc,
+                app,
+                right,
+                dock_top,
+                card_width,
+                button_color,
+                text_color,
+            );
+            right -= 10;
+        }
         if app.settings.tray {
-            let left = right - 76;
+            let left = right - 48;
             capsule(dc, left, dock_top + 12, right, dock_top + 54, button_color);
-            label(dc, left + 13, dock_top + 26, "Tray ^");
+            label(
+                dc,
+                left + 17,
+                dock_top + 24,
+                if app.tray_open { "⌄" } else { "⌃" },
+            );
             app.hits.push(HitBox {
                 rect: rect(left, dock_top + 12, right, dock_top + 54),
                 action: HitAction::Tray,
@@ -1103,10 +1129,8 @@ unsafe fn paint(hwnd: HWND, app: &mut App) {
             right = left - 10;
         }
 
-        let reserve_clock = if app.settings.clock { 68 } else { 0 };
-        let reserve_time = reserve_clock + if app.settings.date { 71 } else { 0 };
-        let reserve_apps = 260 + 96;
-        if app.settings.battery && right - 88 >= reserve_apps + reserve_time {
+        let reserve_apps = 160 + 96;
+        if app.settings.battery && right - 88 >= reserve_apps {
             let mut power: SYSTEM_POWER_STATUS = zeroed();
             let value = if GetSystemPowerStatus(&mut power) != 0 && power.BatteryLifePercent != 255
             {
@@ -1126,7 +1150,7 @@ unsafe fn paint(hwnd: HWND, app: &mut App) {
             label(dc, right, dock_top + 25, &value);
             right -= 6;
         }
-        if app.settings.ram && right - 94 >= reserve_apps + reserve_time {
+        if app.settings.ram && right - 94 >= reserve_apps {
             let mut memory: MEMORYSTATUSEX = zeroed();
             memory.dwLength = size_of::<MEMORYSTATUSEX>() as u32;
             let value = if GlobalMemoryStatusEx(&mut memory) != 0 {
@@ -1146,7 +1170,7 @@ unsafe fn paint(hwnd: HWND, app: &mut App) {
             label(dc, right, dock_top + 25, &value);
             right -= 6;
         }
-        if app.settings.cpu && right - 84 >= reserve_apps + reserve_time {
+        if app.settings.cpu && right - 84 >= reserve_apps {
             right -= 78;
             let value = app
                 .cpu_percent
@@ -1162,56 +1186,23 @@ unsafe fn paint(hwnd: HWND, app: &mut App) {
             label(dc, right, dock_top + 25, &value);
             right -= 6;
         }
-        let mut clock: SYSTEMTIME = zeroed();
-        GetLocalTime(&mut clock);
-        if app.settings.date && right - 71 >= reserve_apps + reserve_clock {
-            right -= 65;
-            label(
-                dc,
-                right,
-                dock_top + 25,
-                &format!("{:02}/{:02}", clock.wDay, clock.wMonth),
-            );
-            if app.settings.calendar {
-                app.hits.push(HitBox {
-                    rect: rect(right - 2, dock_top + 12, right + 60, dock_top + 54),
-                    action: HitAction::Calendar,
-                });
-            }
-            right -= 6;
-        }
-        if app.settings.clock && right - 68 >= reserve_apps {
-            right -= 62;
-            label(
-                dc,
-                right,
-                dock_top + 25,
-                &format!("{:02}:{:02}", clock.wHour, clock.wMinute),
-            );
-            right -= 6;
-        }
         if app.settings.music && right - 126 >= reserve_apps {
             right -= 118;
+            capsule(
+                dc,
+                right,
+                dock_top + 12,
+                right + 118,
+                dock_top + 54,
+                button_color,
+            );
             for (offset, label_text, action) in [
-                (0, "<<", HitAction::MusicPrev),
-                (40, ">", HitAction::MusicPlay),
-                (80, ">>", HitAction::MusicNext),
+                (0, "⏮", HitAction::MusicPrev),
+                (40, "⏯", HitAction::MusicPlay),
+                (80, "⏭", HitAction::MusicNext),
             ] {
                 let left = right + offset;
-                capsule(
-                    dc,
-                    left,
-                    dock_top + 12,
-                    left + 38,
-                    dock_top + 54,
-                    button_color,
-                );
-                label(
-                    dc,
-                    left + if offset == 40 { 13 } else { 7 },
-                    dock_top + 26,
-                    label_text,
-                );
+                label(dc, left + 11, dock_top + 24, label_text);
                 app.hits.push(HitBox {
                     rect: rect(left, dock_top + 12, left + 38, dock_top + 54),
                     action,
@@ -1225,10 +1216,10 @@ unsafe fn paint(hwnd: HWND, app: &mut App) {
         } else {
             rgb(105, 145, 216)
         });
-        FillRect(dc, &rect(250, dock_top + 16, 251, dock_top + 50), divider);
+        FillRect(dc, &rect(152, dock_top + 16, 153, dock_top + 50), divider);
         DeleteObject(divider);
 
-        let mut x = 260;
+        let mut x = 162;
         let total = (if app.settings.pinned_apps {
             app.settings.pins.len()
         } else {
@@ -1266,9 +1257,9 @@ unsafe fn paint(hwnd: HWND, app: &mut App) {
                     break;
                 }
                 capsule(dc, x, dock_top + 10, x + 42, dock_top + 56, running_color);
-                let icon = GetClassLongPtrW(window.hwnd as HWND, GCLP_HICONSM);
+                let icon = GetClassLongPtrW(window.hwnd as HWND, GCLP_HICON);
                 let icon = if icon == 0 {
-                    GetClassLongPtrW(window.hwnd as HWND, GCLP_HICON)
+                    GetClassLongPtrW(window.hwnd as HWND, GCLP_HICONSM)
                 } else {
                     icon
                 };
@@ -1285,9 +1276,16 @@ unsafe fn paint(hwnd: HWND, app: &mut App) {
                         DI_NORMAL,
                     );
                 } else {
-                    let short: String = window.title.chars().take(2).collect();
-                    label(dc, x + 9, dock_top + 25, &short);
+                    draw_process_icon(dc, window.hwnd as HWND, x + 6, dock_top + 17);
                 }
+                capsule(
+                    dc,
+                    x + 19,
+                    dock_top + 55,
+                    x + 24,
+                    dock_top + 60,
+                    rgb(68, 163, 255),
+                );
                 app.hits.push(HitBox {
                     rect: rect(x, dock_top + 10, x + 42, dock_top + 56),
                     action: HitAction::Running(index),
@@ -1364,7 +1362,162 @@ unsafe fn paint(hwnd: HWND, app: &mut App) {
     }
 }
 
-unsafe fn draw_pin_icon(dc: HDC, target: &str, x: i32, y: i32, label_text: &str) {
+unsafe fn draw_clock_card(
+    dc: HDC,
+    app: &mut App,
+    left: i32,
+    dock_top: i32,
+    width: i32,
+    card_color: u32,
+    text_color: u32,
+) {
+    unsafe {
+        capsule(
+            dc,
+            left,
+            dock_top + 12,
+            left + width,
+            dock_top + 54,
+            card_color,
+        );
+        let mut now: SYSTEMTIME = zeroed();
+        GetLocalTime(&mut now);
+        if app.settings.date {
+            const DAYS: [&str; 7] = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+            const MONTHS: [&str; 12] = [
+                "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
+            ];
+            let day = DAYS[now.wDayOfWeek as usize % DAYS.len()];
+            let month = MONTHS[now.wMonth.saturating_sub(1) as usize % MONTHS.len()];
+            styled_label(
+                dc,
+                left + 10,
+                dock_top + 17,
+                day,
+                11,
+                FW_SEMIBOLD,
+                rgb(106, 170, 255),
+            );
+            styled_label(
+                dc,
+                left + 10,
+                dock_top + 33,
+                &format!("{} {month}", now.wDay),
+                15,
+                FW_SEMIBOLD,
+                text_color,
+            );
+            if app.settings.calendar {
+                app.hits.push(HitBox {
+                    rect: rect(
+                        left,
+                        dock_top + 12,
+                        left + if app.settings.clock { 87 } else { width },
+                        dock_top + 54,
+                    ),
+                    action: HitAction::Calendar,
+                });
+            }
+        }
+        if app.settings.clock {
+            let clock_left = if app.settings.date {
+                left + 92
+            } else {
+                left + 12
+            };
+            if app.settings.date {
+                let divider = CreateSolidBrush(rgb(73, 98, 142));
+                FillRect(
+                    dc,
+                    &rect(left + 87, dock_top + 19, left + 88, dock_top + 48),
+                    divider,
+                );
+                DeleteObject(divider);
+            }
+            styled_label(
+                dc,
+                clock_left,
+                dock_top + 24,
+                &format!("{:02}:{:02}", now.wHour, now.wMinute),
+                18,
+                FW_SEMIBOLD,
+                text_color,
+            );
+        }
+    }
+}
+
+unsafe fn styled_label(dc: HDC, x: i32, y: i32, text: &str, size: i32, weight: u32, color: u32) {
+    unsafe {
+        let font = CreateFontW(
+            -size,
+            0,
+            0,
+            0,
+            weight as i32,
+            0,
+            0,
+            0,
+            DEFAULT_CHARSET as u32,
+            OUT_DEFAULT_PRECIS as u32,
+            CLIP_DEFAULT_PRECIS as u32,
+            CLEARTYPE_QUALITY as u32,
+            DEFAULT_PITCH as u32,
+            wide("Segoe UI").as_ptr(),
+        );
+        if font.is_null() {
+            label(dc, x, y, text);
+            return;
+        }
+        let old_font = SelectObject(dc, font);
+        let old_color = SetTextColor(dc, color);
+        label(dc, x, y, text);
+        SetTextColor(dc, old_color);
+        SelectObject(dc, old_font);
+        DeleteObject(font);
+    }
+}
+
+unsafe fn draw_pin_icon(dc: HDC, target: &str, x: i32, y: i32, _label_text: &str) {
+    unsafe {
+        let resolved = if !target.contains('\\') && !target.contains('/') {
+            let target_wide = wide(target);
+            let needed = SearchPathW(
+                null(),
+                target_wide.as_ptr(),
+                null(),
+                0,
+                null_mut(),
+                null_mut(),
+            );
+            if needed > 0 && needed < 32768 {
+                let mut buffer = vec![0u16; needed as usize + 1];
+                let written = SearchPathW(
+                    null(),
+                    target_wide.as_ptr(),
+                    null(),
+                    buffer.len() as u32,
+                    buffer.as_mut_ptr(),
+                    null_mut(),
+                );
+                if written > 0 && written < buffer.len() as u32 {
+                    String::from_utf16_lossy(&buffer[..written as usize])
+                } else {
+                    target.to_string()
+                }
+            } else {
+                target.to_string()
+            }
+        } else {
+            target.to_string()
+        };
+        if !draw_file_icon(dc, &resolved, x, y) {
+            draw_generic_icon(dc, x, y);
+        }
+    }
+}
+
+unsafe fn draw_file_icon(dc: HDC, target: &str, x: i32, y: i32) -> bool {
     unsafe {
         let mut info: SHFILEINFOW = zeroed();
         let found = SHGetFileInfoW(
@@ -1372,14 +1525,57 @@ unsafe fn draw_pin_icon(dc: HDC, target: &str, x: i32, y: i32, label_text: &str)
             0,
             &mut info,
             size_of::<SHFILEINFOW>() as u32,
-            SHGFI_ICON | SHGFI_SMALLICON,
+            SHGFI_ICON,
         );
         if found != 0 && !info.hIcon.is_null() {
             DrawIconEx(dc, x, y, info.hIcon, 28, 28, 0, null_mut(), DI_NORMAL);
             DestroyIcon(info.hIcon);
-        } else {
-            let short: String = label_text.chars().take(2).collect();
-            label(dc, x + 3, y + 8, &short);
+            return true;
+        }
+        let found = SHGetFileInfoW(
+            wide(target).as_ptr(),
+            FILE_ATTRIBUTE_NORMAL,
+            &mut info,
+            size_of::<SHFILEINFOW>() as u32,
+            SHGFI_ICON | SHGFI_USEFILEATTRIBUTES,
+        );
+        if found != 0 && !info.hIcon.is_null() {
+            DrawIconEx(dc, x, y, info.hIcon, 28, 28, 0, null_mut(), DI_NORMAL);
+            DestroyIcon(info.hIcon);
+            return true;
+        }
+        false
+    }
+}
+
+unsafe fn draw_process_icon(dc: HDC, hwnd: HWND, x: i32, y: i32) {
+    unsafe {
+        let mut process_id = 0;
+        GetWindowThreadProcessId(hwnd, &mut process_id);
+        if process_id != 0 {
+            let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id);
+            if !process.is_null() {
+                let mut path = vec![0u16; 2048];
+                let mut length = path.len() as u32;
+                let found = QueryFullProcessImageNameW(process, 0, path.as_mut_ptr(), &mut length);
+                CloseHandle(process);
+                if found != 0 {
+                    let target = String::from_utf16_lossy(&path[..length as usize]);
+                    if draw_file_icon(dc, &target, x, y) {
+                        return;
+                    }
+                }
+            }
+        }
+        draw_generic_icon(dc, x, y);
+    }
+}
+
+unsafe fn draw_generic_icon(dc: HDC, x: i32, y: i32) {
+    unsafe {
+        let icon = LoadIconW(null_mut(), IDI_APPLICATION);
+        if !icon.is_null() {
+            DrawIconEx(dc, x, y, icon, 28, 28, 0, null_mut(), DI_NORMAL);
         }
     }
 }
