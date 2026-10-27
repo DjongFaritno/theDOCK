@@ -1,0 +1,27 @@
+name: Windows prototype
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned Rust components
+        run: rustup component add rustfmt clippy
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Run tests
+        run: cargo test --locked
+      - name: Check warnings
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Build Windows executable
+        run: cargo build --locked --release
+      - name: Save executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: thedock-windows-prototype
+          path: target/release/thedock.exe

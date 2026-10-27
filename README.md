@@ -1,6 +1,6 @@
 # theDOCK
 
-theDOCK adalah konsep pengganti taskbar Windows 11 yang ringan, dengan tampilan *liquid glass*. Proyek ini masih berada pada tahap rancangan; belum ada aplikasi yang dapat dipasang atau dijalankan.
+theDOCK adalah proyek pengganti taskbar Windows 11 yang ringan, dengan tampilan *liquid glass*. Kode saat ini adalah **prototipe awal**, belum pengganti taskbar yang siap dipakai sehari-hari.
 
 ![Mockup konsep theDOCK](docs/mockup-thedock.png)
 
@@ -12,8 +12,10 @@ theDOCK adalah konsep pengganti taskbar Windows 11 yang ringan, dengan tampilan 
 - Pengaturan harus tetap dapat dibuka lewat menu dock atau pintasan keyboard, termasuk saat seluruh komponen tampilan dimatikan.
 - Efek kaca dapat dimatikan atau dikurangi untuk menghemat sumber daya.
 
-Lihat [spesifikasi konsep](docs/konsep.md) untuk cakupan versi pertama, interaksi, target performa, dan risiko teknis. Mockup adalah ilustrasi rancangan, bukan tangkapan layar aplikasi yang sudah berjalan.
+Lihat [spesifikasi konsep](docs/konsep.md) untuk tujuan produk dan [catatan pengembangan](docs/pengembangan.md) untuk status fitur serta cara membangun prototipe. Mockup adalah ilustrasi rancangan, bukan tangkapan layar aplikasi yang sudah berjalan.
 
 ## Status
 
-Belum ada kode aplikasi, instalasi, atau hasil pengujian Windows. Langkah berikutnya adalah prototipe Windows untuk memvalidasi penggantian taskbar, pemulihannya, dan akses ke ikon tray aplikasi lain sebelum fitur tersebut dinyatakan siap.
+Prototipe Win32 sudah memiliki dock, tombol Start, jam, tanggal, informasi RAM dan baterai, menu sakelar tiap komponen, panel Tray yang menyatu secara visual, serta mekanisme pemulihan taskbar melalui proses pengawas. Panel Tray **belum menampilkan atau mengendalikan ikon aplikasi lain**. Efek kaca memakai DWM Windows 11 sebagai dasar dan belum diuji secara visual di Windows.
+
+Kode lolos pemeriksaan kompilasi target Windows dan unit test di lingkungan Linux. Pengujian interaktif di Windows 11 masih diperlukan sebelum perilaku taskbar dan tampilannya dapat dinyatakan bekerja.
