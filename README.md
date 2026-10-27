@@ -1,5 +1,7 @@
 # theDOCK
 
+<img src="assets/thedock-icon.png" alt="Ikon theDOCK" width="112">
+
 theDOCK adalah proyek pengganti taskbar Windows 11 yang ringan, dengan tampilan *liquid glass*. Kode saat ini adalah **prototipe awal**, belum pengganti taskbar yang siap dipakai sehari-hari.
 
 ![Mockup konsep theDOCK](docs/mockup-thedock.png)
@@ -16,6 +18,6 @@ Lihat [spesifikasi konsep](docs/konsep.md) untuk tujuan produk dan [catatan peng
 
 ## Status
 
-Prototipe Win32 sudah memiliki dock, tombol Start, jam, tanggal, informasi RAM dan baterai, menu sakelar tiap komponen, panel Tray yang menyatu secara visual, serta mekanisme pemulihan taskbar melalui proses pengawas. Panel Tray **belum menampilkan atau mengendalikan ikon aplikasi lain**. Efek kaca memakai DWM Windows 11 sebagai dasar dan belum diuji secara visual di Windows.
+Prototipe Win32 sudah memiliki dock, tombol Start, jam, tanggal, informasi RAM dan baterai, menu sakelar tiap komponen, panel Tray yang menyatu secara visual, serta mekanisme pemulihan taskbar melalui proses pengawas. Panel Tray **belum menampilkan atau mengendalikan ikon aplikasi lain**. Ikon theDOCK sudah ditanam ke executable Windows. Tampilan kaca memakai dasar gelap transparan dan mencoba efek DWM Windows 11; hasil visualnya masih perlu diuji ulang di Windows.
 
 Kode lolos pemeriksaan kompilasi target Windows dan unit test di lingkungan Linux. Pengujian interaktif di Windows 11 masih diperlukan sebelum perilaku taskbar dan tampilannya dapat dinyatakan bekerja.

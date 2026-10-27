@@ -12,13 +12,15 @@ use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE, HWND, LPARAM, POINT, RECT, SYSTEMTIME,
 };
 use windows_sys::Win32::Graphics::Dwm::{
-    DWMSBT_NONE, DWMSBT_TRANSIENTWINDOW, DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_WINDOW_CORNER_PREFERENCE,
-    DWMWCP_ROUND, DwmExtendFrameIntoClientArea, DwmSetWindowAttribute,
+    DWMSBT_NONE, DWMSBT_TRANSIENTWINDOW, DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_USE_IMMERSIVE_DARK_MODE,
+    DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute,
 };
 use windows_sys::Win32::Graphics::Gdi::{
-    BeginPaint, CombineRgn, CreateRoundRectRgn, CreateSolidBrush, DEFAULT_GUI_FONT, DeleteObject,
-    EndPaint, FillRect, GetStockObject, HDC, InvalidateRect, PAINTSTRUCT, RGN_OR, RoundRect,
-    SelectObject, SetBkMode, SetTextColor, SetWindowRgn, TRANSPARENT, TextOutW,
+    BeginPaint, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, CombineRgn, CreateFontW,
+    CreateRoundRectRgn, CreateSolidBrush, DEFAULT_CHARSET, DEFAULT_GUI_FONT, DEFAULT_PITCH,
+    DeleteObject, EndPaint, FW_MEDIUM, FillRect, GetStockObject, HDC, InvalidateRect,
+    OUT_DEFAULT_PRECIS, PAINTSTRUCT, RGN_OR, RoundRect, SelectObject, SetBkMode, SetTextColor,
+    SetWindowRgn, TRANSPARENT, TextOutW,
 };
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
@@ -28,21 +30,21 @@ use windows_sys::Win32::System::SystemInformation::{
 use windows_sys::Win32::System::Threading::{
     CreateMutexW, GetCurrentProcessId, OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject,
 };
-use windows_sys::Win32::UI::Controls::MARGINS;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, MOD_ALT, MOD_CONTROL,
     RegisterHotKey, SendInput, UnregisterHotKey, VK_ESCAPE, VK_LWIN,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
-    DispatchMessageW, EnumWindows, GWLP_USERDATA, GetClassNameW, GetClientRect, GetCursorPos,
-    GetMessageW, GetSystemMetrics, GetWindowLongPtrW, HWND_TOPMOST, IsWindowVisible, KillTimer,
-    MB_ICONERROR, MB_OK, MF_CHECKED, MF_SEPARATOR, MF_STRING, MSG, MessageBoxW, PostQuitMessage,
-    RegisterClassW, SM_CXSCREEN, SM_CYSCREEN, SW_HIDE, SW_SHOW, SWP_NOACTIVATE,
-    SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow, TPM_RETURNCMD,
-    TrackPopupMenu, TranslateMessage, WM_CLOSE, WM_DESTROY, WM_DISPLAYCHANGE, WM_ERASEBKGND,
-    WM_HOTKEY, WM_KEYDOWN, WM_LBUTTONUP, WM_PAINT, WM_RBUTTONUP, WM_SETTINGCHANGE, WM_TIMER,
-    WNDCLASSW, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    AppendMenuW, CreatePopupMenu, CreateWindowExW, DI_NORMAL, DefWindowProcW, DestroyMenu,
+    DestroyWindow, DispatchMessageW, DrawIconEx, EnumWindows, GWLP_USERDATA, GetClassNameW,
+    GetClientRect, GetCursorPos, GetMessageW, GetSystemMetrics, GetWindowLongPtrW, HICON,
+    HWND_TOPMOST, IsWindowVisible, KillTimer, LWA_ALPHA, LoadIconW, MB_ICONERROR, MB_OK,
+    MF_CHECKED, MF_SEPARATOR, MF_STRING, MSG, MessageBoxW, PostQuitMessage, RegisterClassW,
+    SM_CXSCREEN, SM_CYSCREEN, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SetForegroundWindow,
+    SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow,
+    TPM_RETURNCMD, TrackPopupMenu, TranslateMessage, WM_CLOSE, WM_DESTROY, WM_DISPLAYCHANGE,
+    WM_ERASEBKGND, WM_HOTKEY, WM_KEYDOWN, WM_LBUTTONUP, WM_PAINT, WM_RBUTTONUP, WM_SETTINGCHANGE,
+    WM_TIMER, WNDCLASSW, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
 };
 
 const CLASS_NAME: &str = "theDOCK_prototype";
@@ -66,7 +68,7 @@ struct App {
     settings: Settings,
     settings_path: PathBuf,
     tray_open: bool,
-    glass_available: bool,
+    icon: HICON,
     taskbar: Option<TaskbarGuard>,
 }
 
@@ -160,9 +162,12 @@ pub fn run() -> Result<(), String> {
         if module.is_null() {
             return Err("GetModuleHandleW gagal".into());
         }
+        // MAKEINTRESOURCEW(1): winresource embeds the application icon as ID 1.
+        let icon = LoadIconW(module, std::ptr::dangling::<u16>());
         let window_class = WNDCLASSW {
             lpfnWndProc: Some(window_proc),
             hInstance: module,
+            hIcon: icon,
             lpszClassName: class.as_ptr(),
             ..zeroed()
         };
@@ -170,7 +175,7 @@ pub fn run() -> Result<(), String> {
             return Err("RegisterClassW gagal".into());
         }
         let hwnd = CreateWindowExW(
-            WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
+            WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED,
             class.as_ptr(),
             title.as_ptr(),
             WS_POPUP,
@@ -191,7 +196,7 @@ pub fn run() -> Result<(), String> {
             settings,
             settings_path,
             tray_open: false,
-            glass_available: false,
+            icon,
             taskbar: None,
         });
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, (&mut *app as *mut App) as isize);
@@ -305,7 +310,7 @@ unsafe extern "system" fn window_proc(
                 let x = (lparam as u32 & 0xffff) as i16 as i32;
                 let y = ((lparam as u32 >> 16) & 0xffff) as i16 as i32;
                 let dock_top = if app.tray_open { TRAY_HEIGHT } else { 0 };
-                if app.settings.start && (112..195).contains(&x) && y >= dock_top {
+                if app.settings.start && (158..241).contains(&x) && y >= dock_top {
                     open_start_menu();
                 } else if app.settings.tray && x > DOCK_WIDTH - 116 && y >= dock_top {
                     app.tray_open = !app.tray_open;
@@ -407,12 +412,19 @@ unsafe fn show_settings_menu(hwnd: HWND, app: &mut App) {
 
 unsafe fn apply_glass(hwnd: HWND, app: &mut App) {
     unsafe {
+        let dark_mode: i32 = 1;
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_USE_IMMERSIVE_DARK_MODE as u32,
+            (&dark_mode as *const i32).cast::<c_void>(),
+            size_of::<i32>() as u32,
+        );
         let backdrop = if app.settings.glass {
             DWMSBT_TRANSIENTWINDOW
         } else {
             DWMSBT_NONE
         };
-        let result = DwmSetWindowAttribute(
+        DwmSetWindowAttribute(
             hwnd,
             DWMWA_SYSTEMBACKDROP_TYPE as u32,
             (&backdrop as *const i32).cast::<c_void>(),
@@ -425,27 +437,15 @@ unsafe fn apply_glass(hwnd: HWND, app: &mut App) {
             (&rounded as *const i32).cast::<c_void>(),
             size_of::<i32>() as u32,
         );
-        let margins = MARGINS {
-            cxLeftWidth: -1,
-            cxRightWidth: -1,
-            cyTopHeight: -1,
-            cyBottomHeight: -1,
-        };
-        let flat_margins = MARGINS {
-            cxLeftWidth: 0,
-            cxRightWidth: 0,
-            cyTopHeight: 0,
-            cyBottomHeight: 0,
-        };
-        DwmExtendFrameIntoClientArea(
+        // A full DWM frame made the GDI text white on a white client area on
+        // some Windows themes. Paint an explicit dark surface, then give the
+        // entire window modest translucency when glass is enabled.
+        SetLayeredWindowAttributes(
             hwnd,
-            if app.settings.glass {
-                &margins
-            } else {
-                &flat_margins
-            },
+            0,
+            if app.settings.glass { 235 } else { 255 },
+            LWA_ALPHA,
         );
-        app.glass_available = app.settings.glass && result >= 0;
     }
 }
 
@@ -485,35 +485,66 @@ unsafe fn paint(hwnd: HWND, app: &App) {
         let dc = BeginPaint(hwnd, &mut paint);
         let mut area: RECT = zeroed();
         GetClientRect(hwnd, &mut area);
-        if !app.glass_available {
-            let background = CreateSolidBrush(rgb(18, 29, 51));
-            FillRect(dc, &area, background);
-            DeleteObject(background);
-        }
-        let font = GetStockObject(DEFAULT_GUI_FONT);
+        let background = CreateSolidBrush(rgb(18, 29, 51));
+        FillRect(dc, &area, background);
+        DeleteObject(background);
+        let font = CreateFontW(
+            -17,
+            0,
+            0,
+            0,
+            FW_MEDIUM as i32,
+            0,
+            0,
+            0,
+            DEFAULT_CHARSET as u32,
+            OUT_DEFAULT_PRECIS as u32,
+            CLIP_DEFAULT_PRECIS as u32,
+            CLEARTYPE_QUALITY as u32,
+            DEFAULT_PITCH as u32,
+            wide("Segoe UI").as_ptr(),
+        );
+        let font = if font.is_null() {
+            GetStockObject(DEFAULT_GUI_FONT)
+        } else {
+            font
+        };
         let old_font = SelectObject(dc, font);
         SetBkMode(dc, TRANSPARENT as i32);
         SetTextColor(dc, rgb(245, 247, 255));
 
         let dock_top = if app.tray_open { TRAY_HEIGHT } else { 0 };
-        if !app.glass_available {
-            capsule(
+        capsule(
+            dc,
+            4,
+            dock_top + 4,
+            DOCK_WIDTH - 4,
+            dock_top + 62,
+            rgb(31, 49, 83),
+        );
+        if !app.icon.is_null() {
+            DrawIconEx(
                 dc,
-                4,
-                dock_top + 4,
-                DOCK_WIDTH - 4,
-                dock_top + 62,
-                rgb(31, 49, 83),
+                18,
+                dock_top + 17,
+                app.icon,
+                32,
+                32,
+                0,
+                null_mut(),
+                DI_NORMAL,
             );
+            label(dc, 57, dock_top + 25, "theDOCK");
+        } else {
+            label(dc, 24, dock_top + 25, "theDOCK");
         }
-        label(dc, 24, dock_top + 25, "theDOCK");
 
         if app.settings.start {
-            capsule(dc, 112, dock_top + 12, 194, dock_top + 54, rgb(50, 75, 118));
-            label(dc, 132, dock_top + 26, "Start");
+            capsule(dc, 158, dock_top + 12, 240, dock_top + 54, rgb(50, 75, 118));
+            label(dc, 178, dock_top + 26, "Start");
         }
 
-        let mut x = 215;
+        let mut x = 260;
         let mut clock: SYSTEMTIME = zeroed();
         GetLocalTime(&mut clock);
         if app.settings.clock {
@@ -570,16 +601,14 @@ unsafe fn paint(hwnd: HWND, app: &App) {
             label(dc, DOCK_WIDTH - 91, dock_top + 26, "Tray ^");
         }
         if app.tray_open {
-            if !app.glass_available {
-                capsule(
-                    dc,
-                    DOCK_WIDTH - 310,
-                    4,
-                    DOCK_WIDTH - 8,
-                    TRAY_HEIGHT - 2,
-                    rgb(31, 49, 83),
-                );
-            }
+            capsule(
+                dc,
+                DOCK_WIDTH - 310,
+                4,
+                DOCK_WIDTH - 8,
+                TRAY_HEIGHT - 2,
+                rgb(31, 49, 83),
+            );
             label(dc, DOCK_WIDTH - 286, 27, "Panel Tray");
             label(
                 dc,
@@ -590,6 +619,9 @@ unsafe fn paint(hwnd: HWND, app: &App) {
             label(dc, DOCK_WIDTH - 286, 79, "Prototipe Windows diperlukan.");
         }
         SelectObject(dc, old_font);
+        if font != GetStockObject(DEFAULT_GUI_FONT) {
+            DeleteObject(font);
+        }
         EndPaint(hwnd, &paint);
     }
 }

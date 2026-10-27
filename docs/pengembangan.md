@@ -8,7 +8,12 @@ Prototipe ditulis dengan Rust dan Win32 native. Yang sudah dikodekan:
 - Menu pengaturan melalui klik kanan atau `Ctrl+Alt+D`. Setiap komponen yang tampil memiliki sakelar sendiri. Pengaturan disimpan di `%APPDATA%\theDOCK\settings.json`.
 - Pengaturan untuk menyembunyikan taskbar aktif secara bawaan. Taskbar yang semula terlihat dipulihkan saat keluar normal. Proses pengawas terpisah mencoba memulihkannya jika proses utama berhenti mendadak. Jika pengawas gagal mulai, taskbar tidak disembunyikan.
 - Panel Tray terbuka dalam jendela dock yang sama. Panel ini masih menampilkan status prototipe karena akses ke seluruh ikon tray aplikasi lain belum tervalidasi.
-- Efek kaca mencoba memakai *DWM transient system backdrop* Windows 11, dengan tampilan gelap cadangan bila efek tidak tersedia.
+- Efek kaca mencoba memakai *DWM transient system backdrop* Windows 11. Seluruh area dock kini selalu dicat gelap dengan transparansi ringan agar teks tetap terbaca pada tema Windows terang maupun gelap.
+- Ikon theDOCK tersedia sebagai [PNG](../assets/thedock-icon.png) dan [ICO](../assets/thedock.ico), serta ditanam ke executable Windows.
+
+### Perbaikan tampilan 0.1.1
+
+Uji pengguna menunjukkan kapsul dock putih dengan tombol Start dan Tray terlihat, tetapi teks utama nyaris hilang. Prototipe sebelumnya memperluas bingkai DWM ke seluruh area klien lalu melewatkan pengecatan latar saat efek kaca aktif. Perbaikan ini menghapus perluasan bingkai tersebut, mewarnai permukaan dock secara eksplisit, memakai teks terang di atas latar gelap, dan memperbesar font. Kontras sekarang tidak bergantung pada warna backdrop Windows. Hasil akhirnya tetap perlu dilihat pada mesin Windows 11.
 
 Ini masih tahap pengembangan. Kode telah dikompilasi untuk target Windows melalui `cargo check`; perilaku UI dan pemulihan taskbar **belum diuji pada Windows 11**. Jangan gunakan sebagai pengganti taskbar utama sebelum pengujian tersebut selesai. Proses pengawas memakai executable yang sama; perintah yang menghentikan semua proses `thedock.exe` sekaligus juga menghentikan pengawas.
 
