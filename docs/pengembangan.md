@@ -1,12 +1,14 @@
 # Pengembangan prototipe
 
-## Milestone pertama
+## Fitur yang sudah dikodekan
 
 Prototipe ditulis dengan Rust dan Win32 native. Yang sudah dikodekan:
 
-- Dock di layar utama dengan tombol Start, jam, tanggal, penggunaan RAM, dan baterai.
+- Dock di layar utama dengan tombol Start, aplikasi yang dipin, jendela berjalan, jam, tanggal, CPU, RAM, dan baterai. Ruang ikon menyesuaikan lebar layar; menu `···` memberi akses ke aplikasi yang tidak muat.
+- Seret `.exe` atau pintasan dari Explorer ke dock untuk memin aplikasi. Klik kiri untuk membuka; klik kanan untuk menggeser urutan atau melepas pin. Klik ikon jendela berjalan untuk berpindah ke jendela tersebut.
+- Klik tanggal untuk melihat kalender sederhana. Tombol Media mengirim perintah putar/jeda ke Windows; judul lagu dan kontrol lagu berikutnya belum tersedia.
 - Menu pengaturan melalui klik kanan atau `Ctrl+Alt+D`. Setiap komponen yang tampil memiliki sakelar sendiri. Pengaturan disimpan di `%APPDATA%\theDOCK\settings.json`.
-- Pengaturan untuk menyembunyikan taskbar aktif secara bawaan. Taskbar yang semula terlihat dipulihkan saat keluar normal. Proses pengawas terpisah mencoba memulihkannya jika proses utama berhenti mendadak. Jika pengawas gagal mulai, taskbar tidak disembunyikan.
+- Pengaturan untuk menyembunyikan taskbar aktif secara bawaan. Taskbar yang semula terlihat dipulihkan saat keluar normal. Executable pengawas terpisah mencoba memulihkannya jika aplikasi utama berhenti mendadak. Jika pengawas gagal mulai, taskbar tetap terlihat dan dock masih dapat digunakan.
 - Panel Tray terbuka dalam jendela dock yang sama. Panel ini masih menampilkan status prototipe karena akses ke seluruh ikon tray aplikasi lain belum tervalidasi.
 - Efek kaca mencoba memakai *DWM transient system backdrop* Windows 11. Seluruh area dock kini selalu dicat gelap dengan transparansi ringan agar teks tetap terbaca pada tema Windows terang maupun gelap.
 - Ikon theDOCK tersedia sebagai [PNG](../assets/thedock-icon.png) dan [ICO](../assets/thedock.ico), serta ditanam ke executable Windows.
@@ -15,7 +17,7 @@ Prototipe ditulis dengan Rust dan Win32 native. Yang sudah dikodekan:
 
 Uji pengguna menunjukkan kapsul dock putih dengan tombol Start dan Tray terlihat, tetapi teks utama nyaris hilang. Prototipe sebelumnya memperluas bingkai DWM ke seluruh area klien lalu melewatkan pengecatan latar saat efek kaca aktif. Perbaikan ini menghapus perluasan bingkai tersebut, mewarnai permukaan dock secara eksplisit, memakai teks terang di atas latar gelap, dan memperbesar font. Kontras sekarang tidak bergantung pada warna backdrop Windows. Hasil akhirnya tetap perlu dilihat pada mesin Windows 11.
 
-Ini masih tahap pengembangan. Kode telah dikompilasi untuk target Windows melalui `cargo check`; perilaku UI dan pemulihan taskbar **belum diuji pada Windows 11**. Jangan gunakan sebagai pengganti taskbar utama sebelum pengujian tersebut selesai. Proses pengawas memakai executable yang sama; perintah yang menghentikan semua proses `thedock.exe` sekaligus juga menghentikan pengawas.
+Ini masih tahap pengembangan. Kode telah dikompilasi untuk target Windows melalui `cargo check`; perilaku UI dan pemulihan taskbar **belum diuji pada Windows 11**. Jangan gunakan sebagai pengganti taskbar utama sebelum pengujian tersebut selesai. `thedock-watchdog.exe` harus berada di folder yang sama dengan `thedock.exe` agar taskbar dapat disembunyikan secara aman.
 
 ## Membangun dan menjalankan
 
@@ -23,11 +25,11 @@ Di Windows 11 dengan Rust terpasang:
 
 ```powershell
 cargo test --locked
-cargo build --locked --release
+cargo build --locked --release --bins
 .\target\release\thedock.exe
 ```
 
-`rust-toolchain.toml` menentukan versi Rust. Klik kanan dock atau tekan `Ctrl+Alt+D` untuk membuka sakelar fitur dan pilihan keluar. Tombol Start membuka menu Start Windows. Menu `Keluar dari theDOCK` memulihkan taskbar. Alur build Windows di GitHub Actions menyimpan executable sebagai artefak ketika berhasil.
+`rust-toolchain.toml` menentukan versi Rust. Klik kanan dock atau tekan `Ctrl+Alt+D` untuk membuka sakelar fitur dan pilihan keluar. Tombol Start membuka menu Start Windows. Menu `Keluar dari theDOCK` memulihkan taskbar. Artefak GitHub Actions berisi **kedua** executable; simpan keduanya dalam satu folder.
 
 Di Linux, unit test dan pemeriksaan kode Windows dapat dijalankan tanpa menjalankan UI:
 
@@ -48,4 +50,4 @@ cargo check --locked --target x86_64-pc-windows-gnu
 5. Validasi teknik membaca, menggambar, dan mengklik ikon tray aplikasi lain sebelum mengganti panel status prototipe.
 6. Ukur RAM, CPU diam, dan biaya GPU DWM pada perangkat nyata. Target di [spesifikasi konsep](konsep.md) belum merupakan hasil ukur.
 
-Fitur aplikasi yang dipin, aplikasi berjalan, kalender, musik, CPU, kontrol tray pihak ketiga, auto-hide, dan posisi dock masih dalam rencana.
+Fitur kontrol tray pihak ketiga, auto-hide, posisi dock, ukuran dock, metadata musik, dan efek pembiasan kaca masih dalam rencana.

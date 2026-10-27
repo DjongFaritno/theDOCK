@@ -2,14 +2,15 @@
 //! Safety: Win32 handles and callback pointers stay on this UI thread.
 
 use std::ffi::c_void;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader};
 use std::mem::{size_of, zeroed};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::ptr::{null, null_mut};
 use thedock::{Setting, Settings};
 use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, HANDLE, HWND, LPARAM, POINT, RECT, SYSTEMTIME,
+    CloseHandle, ERROR_ALREADY_EXISTS, FILETIME, GetLastError, HANDLE, HWND, LPARAM, POINT, RECT,
+    SYSTEMTIME,
 };
 use windows_sys::Win32::Graphics::Dwm::{
     DWMSBT_NONE, DWMSBT_TRANSIENTWINDOW, DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_USE_IMMERSIVE_DARK_MODE,
@@ -27,36 +28,45 @@ use windows_sys::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATU
 use windows_sys::Win32::System::SystemInformation::{
     GetLocalTime, GlobalMemoryStatusEx, MEMORYSTATUSEX,
 };
-use windows_sys::Win32::System::Threading::{
-    CreateMutexW, GetCurrentProcessId, OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject,
-};
+use windows_sys::Win32::System::Threading::{CreateMutexW, GetCurrentProcessId, GetSystemTimes};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, MOD_ALT, MOD_CONTROL,
-    RegisterHotKey, SendInput, UnregisterHotKey, VK_ESCAPE, VK_LWIN,
+    RegisterHotKey, SendInput, UnregisterHotKey, VK_ESCAPE, VK_LWIN, VK_MEDIA_PLAY_PAUSE,
+};
+use windows_sys::Win32::UI::Shell::{
+    DragAcceptFiles, DragFinish, DragQueryFileW, HDROP, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON,
+    SHGetFileInfoW, ShellExecuteW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    AppendMenuW, CreatePopupMenu, CreateWindowExW, DI_NORMAL, DefWindowProcW, DestroyMenu,
-    DestroyWindow, DispatchMessageW, DrawIconEx, EnumWindows, GWLP_USERDATA, GetClassNameW,
-    GetClientRect, GetCursorPos, GetMessageW, GetSystemMetrics, GetWindowLongPtrW, HICON,
-    HWND_TOPMOST, IsWindowVisible, KillTimer, LWA_ALPHA, LoadIconW, MB_ICONERROR, MB_OK,
-    MF_CHECKED, MF_SEPARATOR, MF_STRING, MSG, MessageBoxW, PostQuitMessage, RegisterClassW,
-    SM_CXSCREEN, SM_CYSCREEN, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SetForegroundWindow,
-    SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW, SetWindowPos, ShowWindow,
-    TPM_RETURNCMD, TrackPopupMenu, TranslateMessage, WM_CLOSE, WM_DESTROY, WM_DISPLAYCHANGE,
-    WM_ERASEBKGND, WM_HOTKEY, WM_KEYDOWN, WM_LBUTTONUP, WM_PAINT, WM_RBUTTONUP, WM_SETTINGCHANGE,
-    WM_TIMER, WNDCLASSW, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
+    AppendMenuW, CreatePopupMenu, CreateWindowExW, DI_NORMAL, DefWindowProcW, DestroyIcon,
+    DestroyMenu, DestroyWindow, DispatchMessageW, DrawIconEx, EnumWindows, GCLP_HICON,
+    GCLP_HICONSM, GW_OWNER, GWLP_USERDATA, GetClassLongPtrW, GetClassNameW, GetClientRect,
+    GetCursorPos, GetMessageW, GetSystemMetrics, GetWindow, GetWindowLongPtrW, GetWindowTextW,
+    GetWindowThreadProcessId, HICON, HWND_TOPMOST, IsIconic, IsWindowVisible, KillTimer, LWA_ALPHA,
+    LoadIconW, MB_ICONERROR, MB_OK, MF_CHECKED, MF_SEPARATOR, MF_STRING, MSG, MessageBoxW,
+    PostQuitMessage, RegisterClassW, SM_CXSCREEN, SM_CYSCREEN, SW_HIDE, SW_SHOW, SWP_NOACTIVATE,
+    SetForegroundWindow, SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW, SetWindowPos,
+    ShowWindow, TPM_RETURNCMD, TrackPopupMenu, TranslateMessage, WM_CLOSE, WM_DESTROY,
+    WM_DISPLAYCHANGE, WM_DROPFILES, WM_ERASEBKGND, WM_HOTKEY, WM_KEYDOWN, WM_LBUTTONUP, WM_PAINT,
+    WM_RBUTTONUP, WM_SETTINGCHANGE, WM_TIMER, WNDCLASSW, WS_EX_LAYERED, WS_EX_TOOLWINDOW,
+    WS_EX_TOPMOST, WS_POPUP,
 };
 
 const CLASS_NAME: &str = "theDOCK_prototype";
-const DOCK_WIDTH: i32 = 720;
+const DOCK_MAX_WIDTH: i32 = 1120;
 const DOCK_HEIGHT: i32 = 66;
 const TRAY_HEIGHT: i32 = 128;
 const TIMER_ID: usize = 1;
 const MENU_HOTKEY_ID: i32 = 1;
 const SETTINGS_MENU: &[(u32, Setting, &str)] = &[
     (8, Setting::Start, "Tombol Start"),
+    (9, Setting::PinnedApps, "Aplikasi dipin"),
+    (10, Setting::RunningApps, "Aplikasi berjalan"),
     (1, Setting::Clock, "Jam"),
     (2, Setting::Date, "Tanggal"),
+    (11, Setting::Calendar, "Kalender"),
+    (12, Setting::Music, "Kontrol musik"),
+    (13, Setting::Cpu, "CPU"),
     (3, Setting::Ram, "RAM"),
     (4, Setting::Battery, "Baterai"),
     (5, Setting::Tray, "Tombol Tray"),
@@ -69,7 +79,67 @@ struct App {
     settings_path: PathBuf,
     tray_open: bool,
     icon: HICON,
+    running: Vec<RunningWindow>,
+    hits: Vec<HitBox>,
+    cpu_sample: Option<(u64, u64)>,
+    cpu_percent: Option<u32>,
     taskbar: Option<TaskbarGuard>,
+}
+
+#[derive(Clone)]
+struct RunningWindow {
+    hwnd: usize,
+    title: String,
+}
+
+#[derive(Clone, Copy)]
+enum HitAction {
+    Start,
+    Pin(usize),
+    Running(usize),
+    MoreApps,
+    Tray,
+    Calendar,
+    Music,
+}
+
+struct HitBox {
+    rect: RECT,
+    action: HitAction,
+}
+
+impl HitBox {
+    fn contains(&self, x: i32, y: i32) -> bool {
+        x >= self.rect.left && x < self.rect.right && y >= self.rect.top && y < self.rect.bottom
+    }
+}
+
+impl App {
+    fn sample_cpu(&mut self) {
+        unsafe {
+            let mut idle: FILETIME = zeroed();
+            let mut kernel: FILETIME = zeroed();
+            let mut user: FILETIME = zeroed();
+            if GetSystemTimes(&mut idle, &mut kernel, &mut user) == 0 {
+                return;
+            }
+            let idle = filetime_ticks(idle);
+            let total = filetime_ticks(kernel).saturating_add(filetime_ticks(user));
+            if let Some((previous_idle, previous_total)) = self.cpu_sample {
+                let idle_delta = idle.saturating_sub(previous_idle);
+                let total_delta = total.saturating_sub(previous_total);
+                let busy = total_delta.saturating_sub(idle_delta).saturating_mul(100);
+                self.cpu_percent = busy
+                    .checked_div(total_delta)
+                    .map(|value| value.min(100) as u32);
+            }
+            self.cpu_sample = Some((idle, total));
+        }
+    }
+}
+
+fn filetime_ticks(value: FILETIME) -> u64 {
+    (value.dwHighDateTime as u64) << 32 | value.dwLowDateTime as u64
 }
 
 struct TaskbarGuard {
@@ -94,9 +164,14 @@ impl TaskbarGuard {
 
         // The watcher must confirm that it has a live parent handle before the
         // taskbar is hidden. It restores the original visible windows on crash.
-        let mut command = Command::new(std::env::current_exe().map_err(|e| e.to_string())?);
+        let helper = std::env::current_exe()
+            .map_err(|e| e.to_string())?
+            .with_file_name("thedock-watchdog.exe");
+        if !helper.is_file() {
+            return Err("thedock-watchdog.exe tidak ditemukan; taskbar tetap terlihat".into());
+        }
+        let mut command = Command::new(helper);
         command
-            .arg("--watchdog")
             .arg(unsafe { GetCurrentProcessId() }.to_string())
             .stdout(Stdio::piped())
             .stdin(Stdio::null());
@@ -134,11 +209,6 @@ impl Drop for TaskbarGuard {
 }
 
 pub fn run() -> Result<(), String> {
-    let args: Vec<String> = std::env::args().collect();
-    if args.get(1).is_some_and(|arg| arg == "--watchdog") {
-        return watchdog(&args[2..]);
-    }
-
     let mutex = unsafe { CreateMutexW(null(), 0, wide("Local\\theDOCK-prototype").as_ptr()) };
     if mutex.is_null() {
         return Err("Kunci satu instansi gagal dibuat".into());
@@ -181,7 +251,7 @@ pub fn run() -> Result<(), String> {
             WS_POPUP,
             0,
             0,
-            DOCK_WIDTH,
+            DOCK_MAX_WIDTH,
             DOCK_HEIGHT,
             null_mut(),
             null_mut(),
@@ -197,22 +267,30 @@ pub fn run() -> Result<(), String> {
             settings_path,
             tray_open: false,
             icon,
+            running: Vec::new(),
+            hits: Vec::new(),
+            cpu_sample: None,
+            cpu_percent: None,
             taskbar: None,
         });
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, (&mut *app as *mut App) as isize);
         apply_glass(hwnd, &mut app);
+        app.running = running_windows(hwnd);
+        app.sample_cpu();
         position_window(hwnd, false);
         ShowWindow(hwnd, SW_SHOW);
+        DragAcceptFiles(hwnd, 1);
         RegisterHotKey(hwnd, MENU_HOTKEY_ID, MOD_CONTROL | MOD_ALT, b'D' as u32);
-        SetTimer(hwnd, TIMER_ID, 30_000, None);
+        SetTimer(hwnd, TIMER_ID, 10_000, None);
 
         if app.settings.hide_taskbar {
             // If the watcher cannot start, keep Windows' taskbar available.
             match TaskbarGuard::hide() {
                 Ok(guard) => app.taskbar = guard,
                 Err(error) => {
-                    DestroyWindow(hwnd);
-                    return Err(error);
+                    app.settings.hide_taskbar = false;
+                    show_error(&error);
+                    save_settings(hwnd, &app);
                 }
             }
         }
@@ -223,34 +301,6 @@ pub fn run() -> Result<(), String> {
             DispatchMessageW(&message);
         }
         drop(app);
-    }
-    Ok(())
-}
-
-fn watchdog(args: &[String]) -> Result<(), String> {
-    let pid: u32 = args
-        .first()
-        .ok_or("PID watchdog tidak ada")?
-        .parse()
-        .map_err(|_| "PID watchdog tidak valid")?;
-    let handles: Vec<usize> = args[1..]
-        .iter()
-        .map(|value| {
-            value
-                .parse()
-                .map_err(|_| "handle taskbar tidak valid".to_string())
-        })
-        .collect::<Result<_, _>>()?;
-    unsafe {
-        let parent = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
-        if parent.is_null() {
-            return Err("OpenProcess untuk watchdog gagal".into());
-        }
-        println!("READY");
-        std::io::stdout().flush().map_err(|e| e.to_string())?;
-        WaitForSingleObject(parent, u32::MAX);
-        restore_taskbars(&handles);
-        CloseHandle(parent);
     }
     Ok(())
 }
@@ -272,6 +322,56 @@ unsafe fn visible_taskbars() -> Vec<usize> {
     let mut handles = Vec::<usize>::new();
     unsafe { EnumWindows(Some(collect), (&mut handles as *mut Vec<usize>) as isize) };
     handles
+}
+
+unsafe fn running_windows(own_window: HWND) -> Vec<RunningWindow> {
+    struct Collector {
+        own_window: HWND,
+        windows: Vec<RunningWindow>,
+    }
+
+    unsafe extern "system" fn collect(hwnd: HWND, param: LPARAM) -> i32 {
+        unsafe {
+            let collector = &mut *(param as *mut Collector);
+            if hwnd == collector.own_window
+                || IsWindowVisible(hwnd) == 0
+                || !GetWindow(hwnd, GW_OWNER).is_null()
+            {
+                return 1;
+            }
+            let mut pid = 0;
+            GetWindowThreadProcessId(hwnd, &mut pid);
+            if pid == GetCurrentProcessId() {
+                return 1;
+            }
+            let mut title = [0u16; 256];
+            let length = GetWindowTextW(hwnd, title.as_mut_ptr(), title.len() as i32);
+            if length <= 0 {
+                return 1;
+            }
+            let mut class = [0u16; 64];
+            let class_length = GetClassNameW(hwnd, class.as_mut_ptr(), class.len() as i32);
+            let class = String::from_utf16_lossy(&class[..class_length.max(0) as usize]);
+            if matches!(
+                class.as_str(),
+                "Shell_TrayWnd" | "Shell_SecondaryTrayWnd" | "Progman" | "WorkerW"
+            ) {
+                return 1;
+            }
+            collector.windows.push(RunningWindow {
+                hwnd: hwnd as usize,
+                title: String::from_utf16_lossy(&title[..length as usize]),
+            });
+        }
+        1
+    }
+
+    let mut collector = Collector {
+        own_window,
+        windows: Vec::new(),
+    };
+    unsafe { EnumWindows(Some(collect), (&mut collector as *mut Collector) as isize) };
+    collector.windows
 }
 
 unsafe fn restore_taskbars(handles: &[usize]) {
@@ -309,18 +409,48 @@ unsafe extern "system" fn window_proc(
             WM_LBUTTONUP => {
                 let x = (lparam as u32 & 0xffff) as i16 as i32;
                 let y = ((lparam as u32 >> 16) & 0xffff) as i16 as i32;
-                let dock_top = if app.tray_open { TRAY_HEIGHT } else { 0 };
-                if app.settings.start && (158..241).contains(&x) && y >= dock_top {
-                    open_start_menu();
-                } else if app.settings.tray && x > DOCK_WIDTH - 116 && y >= dock_top {
-                    app.tray_open = !app.tray_open;
-                    position_window(hwnd, app.tray_open);
-                    InvalidateRect(hwnd, null(), 0);
+                let action = app
+                    .hits
+                    .iter()
+                    .find(|hit| hit.contains(x, y))
+                    .map(|hit| hit.action);
+                match action {
+                    Some(HitAction::Start) => open_start_menu(),
+                    Some(HitAction::Pin(index)) => launch_pin(hwnd, app, index),
+                    Some(HitAction::Running(index)) => activate_window(app, index),
+                    Some(HitAction::MoreApps) => show_overflow_menu(hwnd, app),
+                    Some(HitAction::Tray) => {
+                        app.tray_open = !app.tray_open;
+                        position_window(hwnd, app.tray_open);
+                        InvalidateRect(hwnd, null(), 0);
+                    }
+                    Some(HitAction::Calendar) => show_calendar(hwnd),
+                    Some(HitAction::Music) => send_media_key(),
+                    None => {}
                 }
                 0
             }
-            WM_RBUTTONUP | WM_HOTKEY => {
+            WM_RBUTTONUP => {
+                let x = (lparam as u32 & 0xffff) as i16 as i32;
+                let y = ((lparam as u32 >> 16) & 0xffff) as i16 as i32;
+                if let Some(HitAction::Pin(index)) = app
+                    .hits
+                    .iter()
+                    .find(|hit| hit.contains(x, y))
+                    .map(|hit| hit.action)
+                {
+                    show_pin_menu(hwnd, app, index);
+                } else {
+                    show_settings_menu(hwnd, app);
+                }
+                0
+            }
+            WM_HOTKEY => {
                 show_settings_menu(hwnd, app);
+                0
+            }
+            WM_DROPFILES => {
+                pin_dropped_files(hwnd, app, wparam as HDROP);
                 0
             }
             WM_KEYDOWN if wparam == VK_ESCAPE as usize => {
@@ -329,7 +459,13 @@ unsafe extern "system" fn window_proc(
                 InvalidateRect(hwnd, null(), 0);
                 0
             }
-            WM_TIMER | WM_SETTINGCHANGE => {
+            WM_TIMER => {
+                app.running = running_windows(hwnd);
+                app.sample_cpu();
+                InvalidateRect(hwnd, null(), 0);
+                0
+            }
+            WM_SETTINGCHANGE => {
                 InvalidateRect(hwnd, null(), 0);
                 0
             }
@@ -342,6 +478,7 @@ unsafe extern "system" fn window_proc(
                 0
             }
             WM_DESTROY => {
+                DragAcceptFiles(hwnd, 0);
                 UnregisterHotKey(hwnd, MENU_HOTKEY_ID);
                 KillTimer(hwnd, TIMER_ID);
                 app.taskbar = None;
@@ -410,6 +547,180 @@ unsafe fn show_settings_menu(hwnd: HWND, app: &mut App) {
     }
 }
 
+unsafe fn show_pin_menu(hwnd: HWND, app: &mut App, index: usize) {
+    if index >= app.settings.pins.len() {
+        return;
+    }
+    unsafe {
+        let menu = CreatePopupMenu();
+        if menu.is_null() {
+            return;
+        }
+        let title = format!("Buka {}", app.settings.pins[index].label);
+        AppendMenuW(menu, MF_STRING, 201, wide(&title).as_ptr());
+        AppendMenuW(menu, MF_STRING, 202, wide("Geser ke kiri").as_ptr());
+        AppendMenuW(menu, MF_STRING, 203, wide("Geser ke kanan").as_ptr());
+        AppendMenuW(menu, MF_STRING, 204, wide("Lepas pin").as_ptr());
+        let mut point: POINT = zeroed();
+        GetCursorPos(&mut point);
+        SetForegroundWindow(hwnd);
+        let action = TrackPopupMenu(menu, TPM_RETURNCMD, point.x, point.y, 0, hwnd, null());
+        DestroyMenu(menu);
+        let changed = match action {
+            201 => {
+                launch_pin(hwnd, app, index);
+                false
+            }
+            202 => app.settings.move_pin(index, -1),
+            203 => app.settings.move_pin(index, 1),
+            204 => app.settings.unpin(index),
+            _ => false,
+        };
+        if changed {
+            save_settings(hwnd, app);
+        }
+    }
+}
+
+unsafe fn show_overflow_menu(hwnd: HWND, app: &App) {
+    unsafe {
+        let menu = CreatePopupMenu();
+        if menu.is_null() {
+            return;
+        }
+        if app.settings.pinned_apps {
+            for (index, pin) in app.settings.pins.iter().enumerate().take(100) {
+                AppendMenuW(menu, MF_STRING, 1_000 + index, wide(&pin.label).as_ptr());
+            }
+        }
+        if app.settings.running_apps {
+            if !app.settings.pins.is_empty() {
+                AppendMenuW(menu, MF_SEPARATOR, 0, null());
+            }
+            for (index, window) in app.running.iter().enumerate().take(100) {
+                let name: String = window.title.chars().take(50).collect();
+                AppendMenuW(menu, MF_STRING, 2_000 + index, wide(&name).as_ptr());
+            }
+        }
+        let mut point: POINT = zeroed();
+        GetCursorPos(&mut point);
+        SetForegroundWindow(hwnd);
+        let action = TrackPopupMenu(menu, TPM_RETURNCMD, point.x, point.y, 0, hwnd, null());
+        DestroyMenu(menu);
+        match action {
+            1_000..=1_099 => launch_pin(hwnd, app, (action - 1_000) as usize),
+            2_000..=2_099 => activate_window(app, (action - 2_000) as usize),
+            _ => {}
+        }
+    }
+}
+
+unsafe fn launch_pin(hwnd: HWND, app: &App, index: usize) {
+    let Some(pin) = app.settings.pins.get(index) else {
+        return;
+    };
+    unsafe {
+        let result = ShellExecuteW(
+            hwnd,
+            wide("open").as_ptr(),
+            wide(&pin.target).as_ptr(),
+            null(),
+            null(),
+            SW_SHOW,
+        );
+        if result as isize <= 32 {
+            show_error(&format!("Tidak dapat membuka {}", pin.label));
+        }
+    }
+}
+
+unsafe fn activate_window(app: &App, index: usize) {
+    let Some(window) = app.running.get(index) else {
+        return;
+    };
+    unsafe {
+        let hwnd = window.hwnd as HWND;
+        if IsIconic(hwnd) != 0 {
+            ShowWindow(
+                hwnd,
+                windows_sys::Win32::UI::WindowsAndMessaging::SW_RESTORE,
+            );
+        }
+        SetForegroundWindow(hwnd);
+    }
+}
+
+unsafe fn pin_dropped_files(hwnd: HWND, app: &mut App, drop: HDROP) {
+    unsafe {
+        let count = DragQueryFileW(drop, u32::MAX, null_mut(), 0).min(32);
+        let mut changed = false;
+        for index in 0..count {
+            let length = DragQueryFileW(drop, index, null_mut(), 0);
+            if length == 0 {
+                continue;
+            }
+            let mut buffer = vec![0u16; length as usize + 1];
+            if DragQueryFileW(drop, index, buffer.as_mut_ptr(), buffer.len() as u32) == 0 {
+                continue;
+            }
+            let target = String::from_utf16_lossy(&buffer[..length as usize]);
+            let label = Path::new(&target)
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("Aplikasi")
+                .to_string();
+            changed |= app.settings.pin(label, target);
+        }
+        DragFinish(drop);
+        if changed {
+            save_settings(hwnd, app);
+        }
+    }
+}
+
+unsafe fn save_settings(hwnd: HWND, app: &App) {
+    if let Err(error) = app.settings.save(&app.settings_path) {
+        show_error(&format!("Pengaturan gagal disimpan: {error}"));
+    }
+    unsafe { InvalidateRect(hwnd, null(), 0) };
+}
+
+unsafe fn show_calendar(hwnd: HWND) {
+    unsafe {
+        let mut date: SYSTEMTIME = zeroed();
+        GetLocalTime(&mut date);
+        let year = date.wYear as u32;
+        let month = date.wMonth as u32;
+        let first_weekday = (date.wDayOfWeek as u32 + 7 - ((date.wDay as u32 - 1) % 7)) % 7;
+        let days = match month {
+            4 | 6 | 9 | 11 => 30,
+            2 if year.is_multiple_of(4)
+                && (!year.is_multiple_of(100) || year.is_multiple_of(400)) =>
+            {
+                29
+            }
+            2 => 28,
+            _ => 31,
+        };
+        let mut text = format!("{:02}/{year}\nMin Sen Sel Rab Kam Jum Sab\n", month);
+        for _ in 0..first_weekday {
+            text.push_str("    ");
+        }
+        for day in 1..=days {
+            text.push_str(&format!("{day:>3} "));
+            if (first_weekday + day).is_multiple_of(7) {
+                text.push('\n');
+            }
+        }
+        MessageBoxW(
+            hwnd,
+            wide(&text).as_ptr(),
+            wide("Kalender theDOCK").as_ptr(),
+            MB_OK,
+        );
+    }
+}
+
 unsafe fn apply_glass(hwnd: HWND, app: &mut App) {
     unsafe {
         let dark_mode: i32 = 1;
@@ -452,21 +763,22 @@ unsafe fn apply_glass(hwnd: HWND, app: &mut App) {
 unsafe fn position_window(hwnd: HWND, tray_open: bool) {
     unsafe {
         let height = DOCK_HEIGHT + if tray_open { TRAY_HEIGHT } else { 0 };
-        let x = (GetSystemMetrics(SM_CXSCREEN) - DOCK_WIDTH) / 2;
+        let screen_width = GetSystemMetrics(SM_CXSCREEN);
+        let width = (screen_width - 32).clamp(560, DOCK_MAX_WIDTH);
+        let x = (screen_width - width) / 2;
         let y = GetSystemMetrics(SM_CYSCREEN) - height - 16;
-        SetWindowPos(hwnd, HWND_TOPMOST, x, y, DOCK_WIDTH, height, SWP_NOACTIVATE);
+        SetWindowPos(hwnd, HWND_TOPMOST, x, y, width, height, SWP_NOACTIVATE);
         let region = CreateRoundRectRgn(
             0,
             if tray_open { TRAY_HEIGHT } else { 0 },
-            DOCK_WIDTH,
+            width,
             height,
             66,
             66,
         );
         if !region.is_null() {
             if tray_open {
-                let tray =
-                    CreateRoundRectRgn(DOCK_WIDTH - 320, 0, DOCK_WIDTH, TRAY_HEIGHT + 20, 32, 32);
+                let tray = CreateRoundRectRgn(width - 320, 0, width, TRAY_HEIGHT + 20, 32, 32);
                 if !tray.is_null() {
                     CombineRgn(region, region, tray, RGN_OR);
                     DeleteObject(tray);
@@ -479,7 +791,7 @@ unsafe fn position_window(hwnd: HWND, tray_open: bool) {
     }
 }
 
-unsafe fn paint(hwnd: HWND, app: &App) {
+unsafe fn paint(hwnd: HWND, app: &mut App) {
     unsafe {
         let mut paint: PAINTSTRUCT = zeroed();
         let dc = BeginPaint(hwnd, &mut paint);
@@ -513,12 +825,14 @@ unsafe fn paint(hwnd: HWND, app: &App) {
         SetBkMode(dc, TRANSPARENT as i32);
         SetTextColor(dc, rgb(245, 247, 255));
 
+        app.hits.clear();
+        let width = area.right;
         let dock_top = if app.tray_open { TRAY_HEIGHT } else { 0 };
         capsule(
             dc,
             4,
             dock_top + 4,
-            DOCK_WIDTH - 4,
+            width - 4,
             dock_top + 62,
             rgb(31, 49, 83),
         );
@@ -542,81 +856,224 @@ unsafe fn paint(hwnd: HWND, app: &App) {
         if app.settings.start {
             capsule(dc, 158, dock_top + 12, 240, dock_top + 54, rgb(50, 75, 118));
             label(dc, 178, dock_top + 26, "Start");
+            app.hits.push(HitBox {
+                rect: rect(158, dock_top + 12, 240, dock_top + 54),
+                action: HitAction::Start,
+            });
         }
 
-        let mut x = 260;
-        let mut clock: SYSTEMTIME = zeroed();
-        GetLocalTime(&mut clock);
-        if app.settings.clock {
-            label(
-                dc,
-                x,
-                dock_top + 25,
-                &format!("{:02}:{:02}", clock.wHour, clock.wMinute),
-            );
-            x += 62;
-        }
-        if app.settings.date {
-            label(
-                dc,
-                x,
-                dock_top + 25,
-                &format!("{:02}/{:02}", clock.wDay, clock.wMonth),
-            );
-            x += 68;
-        }
-        if app.settings.ram {
-            let mut memory: MEMORYSTATUSEX = zeroed();
-            memory.dwLength = size_of::<MEMORYSTATUSEX>() as u32;
-            if GlobalMemoryStatusEx(&mut memory) != 0 {
-                label(
-                    dc,
-                    x,
-                    dock_top + 25,
-                    &format!("RAM {}%", memory.dwMemoryLoad),
-                );
-                x += 84;
-            }
-        }
-        if app.settings.battery {
-            let mut power: SYSTEM_POWER_STATUS = zeroed();
-            if GetSystemPowerStatus(&mut power) != 0 && power.BatteryLifePercent != 255 {
-                label(
-                    dc,
-                    x,
-                    dock_top + 25,
-                    &format!("BAT {}%", power.BatteryLifePercent),
-                );
-            }
-        }
+        let mut right = width - 18;
         if app.settings.tray {
+            let left = right - 76;
             capsule(
                 dc,
-                DOCK_WIDTH - 114,
+                left,
                 dock_top + 12,
-                DOCK_WIDTH - 18,
+                right,
                 dock_top + 54,
                 rgb(50, 75, 118),
             );
-            label(dc, DOCK_WIDTH - 91, dock_top + 26, "Tray ^");
+            label(dc, left + 13, dock_top + 26, "Tray ^");
+            app.hits.push(HitBox {
+                rect: rect(left, dock_top + 12, right, dock_top + 54),
+                action: HitAction::Tray,
+            });
+            right = left - 10;
         }
+
+        let reserve_clock = if app.settings.clock { 68 } else { 0 };
+        let reserve_time = reserve_clock + if app.settings.date { 71 } else { 0 };
+        let reserve_apps = 260 + 96;
+        if app.settings.battery && right - 88 >= reserve_apps + reserve_time {
+            let mut power: SYSTEM_POWER_STATUS = zeroed();
+            let value = if GetSystemPowerStatus(&mut power) != 0 && power.BatteryLifePercent != 255
+            {
+                format!("BAT {}%", power.BatteryLifePercent)
+            } else {
+                "AC".into()
+            };
+            right -= 82;
+            label(dc, right, dock_top + 25, &value);
+            right -= 6;
+        }
+        if app.settings.ram && right - 94 >= reserve_apps + reserve_time {
+            let mut memory: MEMORYSTATUSEX = zeroed();
+            memory.dwLength = size_of::<MEMORYSTATUSEX>() as u32;
+            let value = if GlobalMemoryStatusEx(&mut memory) != 0 {
+                format!("RAM {}%", memory.dwMemoryLoad)
+            } else {
+                "RAM ?".into()
+            };
+            right -= 88;
+            label(dc, right, dock_top + 25, &value);
+            right -= 6;
+        }
+        if app.settings.cpu && right - 84 >= reserve_apps + reserve_time {
+            right -= 78;
+            let value = app
+                .cpu_percent
+                .map_or("CPU ?".into(), |value| format!("CPU {value}%"));
+            label(dc, right, dock_top + 25, &value);
+            right -= 6;
+        }
+        let mut clock: SYSTEMTIME = zeroed();
+        GetLocalTime(&mut clock);
+        if app.settings.date && right - 71 >= reserve_apps + reserve_clock {
+            right -= 65;
+            label(
+                dc,
+                right,
+                dock_top + 25,
+                &format!("{:02}/{:02}", clock.wDay, clock.wMonth),
+            );
+            if app.settings.calendar {
+                app.hits.push(HitBox {
+                    rect: rect(right - 2, dock_top + 12, right + 60, dock_top + 54),
+                    action: HitAction::Calendar,
+                });
+            }
+            right -= 6;
+        }
+        if app.settings.clock && right - 68 >= reserve_apps {
+            right -= 62;
+            label(
+                dc,
+                right,
+                dock_top + 25,
+                &format!("{:02}:{:02}", clock.wHour, clock.wMinute),
+            );
+            right -= 6;
+        }
+        if app.settings.music && right - 80 >= reserve_apps {
+            right -= 72;
+            capsule(
+                dc,
+                right,
+                dock_top + 12,
+                right + 68,
+                dock_top + 54,
+                rgb(50, 75, 118),
+            );
+            label(dc, right + 11, dock_top + 26, "Media");
+            app.hits.push(HitBox {
+                rect: rect(right, dock_top + 12, right + 68, dock_top + 54),
+                action: HitAction::Music,
+            });
+            right -= 8;
+        }
+
+        let mut x = 260;
+        let total = (if app.settings.pinned_apps {
+            app.settings.pins.len()
+        } else {
+            0
+        }) + (if app.settings.running_apps {
+            app.running.len()
+        } else {
+            0
+        });
+        let capacity = ((right - 8 - x) / 48).max(0) as usize;
+        let visible_capacity = if total > capacity {
+            capacity.saturating_sub(1)
+        } else {
+            capacity
+        };
+        let mut shown = 0;
+        if app.settings.pinned_apps {
+            for (index, pin) in app.settings.pins.iter().enumerate() {
+                if shown >= visible_capacity {
+                    break;
+                }
+                capsule(
+                    dc,
+                    x,
+                    dock_top + 10,
+                    x + 42,
+                    dock_top + 56,
+                    rgb(44, 64, 101),
+                );
+                draw_pin_icon(dc, &pin.target, x + 6, dock_top + 17, &pin.label);
+                app.hits.push(HitBox {
+                    rect: rect(x, dock_top + 10, x + 42, dock_top + 56),
+                    action: HitAction::Pin(index),
+                });
+                x += 48;
+                shown += 1;
+            }
+        }
+        if app.settings.running_apps {
+            for (index, window) in app.running.iter().enumerate() {
+                if shown >= visible_capacity {
+                    break;
+                }
+                capsule(
+                    dc,
+                    x,
+                    dock_top + 10,
+                    x + 42,
+                    dock_top + 56,
+                    rgb(39, 80, 116),
+                );
+                let icon = GetClassLongPtrW(window.hwnd as HWND, GCLP_HICONSM);
+                let icon = if icon == 0 {
+                    GetClassLongPtrW(window.hwnd as HWND, GCLP_HICON)
+                } else {
+                    icon
+                };
+                if icon != 0 {
+                    DrawIconEx(
+                        dc,
+                        x + 6,
+                        dock_top + 17,
+                        icon as HICON,
+                        28,
+                        28,
+                        0,
+                        null_mut(),
+                        DI_NORMAL,
+                    );
+                } else {
+                    let short: String = window.title.chars().take(2).collect();
+                    label(dc, x + 9, dock_top + 25, &short);
+                }
+                app.hits.push(HitBox {
+                    rect: rect(x, dock_top + 10, x + 42, dock_top + 56),
+                    action: HitAction::Running(index),
+                });
+                x += 48;
+                shown += 1;
+            }
+        }
+        if total > shown && capacity > 0 {
+            capsule(
+                dc,
+                x,
+                dock_top + 10,
+                x + 42,
+                dock_top + 56,
+                rgb(50, 75, 118),
+            );
+            label(dc, x + 13, dock_top + 25, "···");
+            app.hits.push(HitBox {
+                rect: rect(x, dock_top + 10, x + 42, dock_top + 56),
+                action: HitAction::MoreApps,
+            });
+        } else if total == 0 && right - x > 160 {
+            label(dc, x + 5, dock_top + 25, "Tarik aplikasi ke dock untuk pin");
+        }
+
         if app.tray_open {
             capsule(
                 dc,
-                DOCK_WIDTH - 310,
+                width - 310,
                 4,
-                DOCK_WIDTH - 8,
+                width - 8,
                 TRAY_HEIGHT - 2,
                 rgb(31, 49, 83),
             );
-            label(dc, DOCK_WIDTH - 286, 27, "Panel Tray");
-            label(
-                dc,
-                DOCK_WIDTH - 286,
-                57,
-                "Ikon aplikasi lain belum tersedia.",
-            );
-            label(dc, DOCK_WIDTH - 286, 79, "Prototipe Windows diperlukan.");
+            label(dc, width - 286, 27, "Panel Tray");
+            label(dc, width - 286, 57, "Ikon aplikasi lain belum tersedia.");
+            label(dc, width - 286, 79, "Prototipe Windows diperlukan.");
         }
         SelectObject(dc, old_font);
         if font != GetStockObject(DEFAULT_GUI_FONT) {
@@ -626,12 +1083,49 @@ unsafe fn paint(hwnd: HWND, app: &App) {
     }
 }
 
+unsafe fn draw_pin_icon(dc: HDC, target: &str, x: i32, y: i32, label_text: &str) {
+    unsafe {
+        let mut info: SHFILEINFOW = zeroed();
+        let found = SHGetFileInfoW(
+            wide(target).as_ptr(),
+            0,
+            &mut info,
+            size_of::<SHFILEINFOW>() as u32,
+            SHGFI_ICON | SHGFI_SMALLICON,
+        );
+        if found != 0 && !info.hIcon.is_null() {
+            DrawIconEx(dc, x, y, info.hIcon, 28, 28, 0, null_mut(), DI_NORMAL);
+            DestroyIcon(info.hIcon);
+        } else {
+            let short: String = label_text.chars().take(2).collect();
+            label(dc, x + 3, y + 8, &short);
+        }
+    }
+}
+
+fn rect(left: i32, top: i32, right: i32, bottom: i32) -> RECT {
+    RECT {
+        left,
+        top,
+        right,
+        bottom,
+    }
+}
+
 unsafe fn open_start_menu() {
+    unsafe { send_key(VK_LWIN) };
+}
+
+unsafe fn send_media_key() {
+    unsafe { send_key(VK_MEDIA_PLAY_PAUSE) };
+}
+
+unsafe fn send_key(key: u16) {
     let down = INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 {
             ki: KEYBDINPUT {
-                wVk: VK_LWIN,
+                wVk: key,
                 ..KEYBDINPUT::default()
             },
         },
@@ -640,7 +1134,7 @@ unsafe fn open_start_menu() {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 {
             ki: KEYBDINPUT {
-                wVk: VK_LWIN,
+                wVk: key,
                 dwFlags: KEYEVENTF_KEYUP,
                 ..KEYBDINPUT::default()
             },
