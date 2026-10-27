@@ -20,6 +20,6 @@ Lihat [spesifikasi konsep](docs/konsep.md) untuk tujuan produk dan [catatan peng
 
 Prototipe Win32 sudah memiliki dock, tombol Start, aplikasi yang dipin dan sedang berjalan, jam, tanggal, kalender sederhana, kontrol putar/jeda media, informasi CPU/RAM/baterai, serta sakelar tiap komponen. Aplikasi dapat dipin dengan menyeret berkas atau pintasan ke dock; klik kanan ikon pin untuk mengubah urutan atau melepasnya. Posisi atas/bawah, lebar dock, sembunyi otomatis, dan kaca terang/gelap dapat dipilih. Taskbar dipulihkan oleh pengawas terpisah ketika aplikasi utama berhenti.
 
-Panel Tray menyediakan kontrol volume dan jalan pintas ke pengaturan jaringan/Bluetooth, tetapi **belum menampilkan atau mengendalikan ikon tray aplikasi lain**. Ikon theDOCK sudah ditanam ke executable Windows. Tampilan kaca memakai dasar transparan dan mencoba efek DWM Windows 11; hasil visualnya masih perlu diuji ulang di Windows.
+Panel Tray menyediakan kontrol volume dan jalan pintas ke pengaturan jaringan/Bluetooth, tetapi **belum menampilkan atau mengendalikan ikon tray aplikasi lain**. [Catatan validasi tray](docs/tray-feasibility.md) menjelaskan batas API dan alat diagnostik yang tersedia. Ikon theDOCK sudah ditanam ke executable Windows. Tampilan kaca memakai dasar transparan dan mencoba efek DWM Windows 11; hasil visualnya masih perlu diuji ulang di Windows.
 
 Kode lolos pemeriksaan kompilasi target Windows dan unit test di lingkungan Linux. Pengujian interaktif di Windows 11 masih diperlukan sebelum perilaku taskbar dan tampilannya dapat dinyatakan bekerja.

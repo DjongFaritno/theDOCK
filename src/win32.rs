@@ -240,7 +240,19 @@ pub fn run() -> Result<(), String> {
         .ok_or("APPDATA tidak tersedia")?
         .join("theDOCK")
         .join("settings.json");
-    let settings = Settings::load(&settings_path);
+    let settings = match Settings::load_checked(&settings_path) {
+        Ok(settings) => settings,
+        Err(error) => {
+            let safe = Settings {
+                hide_taskbar: false,
+                ..Settings::default()
+            };
+            show_error(&format!(
+                "Pengaturan tidak dapat dibaca ({error}). Taskbar tetap terlihat."
+            ));
+            safe
+        }
+    };
 
     unsafe {
         let class = wide(CLASS_NAME);

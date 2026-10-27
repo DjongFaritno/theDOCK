@@ -30,7 +30,7 @@ cargo build --locked --release --bins
 .\target\release\thedock.exe
 ```
 
-`rust-toolchain.toml` menentukan versi Rust. Klik kanan dock atau tekan `Ctrl+Alt+D` untuk membuka sakelar fitur dan pilihan keluar. Tombol Start membuka menu Start Windows. Menu `Keluar dari theDOCK` memulihkan taskbar. Artefak GitHub Actions berisi **kedua** executable; simpan keduanya dalam satu folder.
+`rust-toolchain.toml` menentukan versi Rust. Klik kanan dock atau tekan `Ctrl+Alt+D` untuk membuka sakelar fitur dan pilihan keluar. Tombol Start membuka menu Start Windows. Menu `Keluar dari theDOCK` memulihkan taskbar. Artefak GitHub Actions berisi `thedock.exe`, `thedock-watchdog.exe`, dan alat diagnostik tray; simpan dua executable pertama dalam satu folder. Lihat [panduan probe tray](tray-feasibility.md) bila menguji integrasi ikon aplikasi lain.
 
 Di Linux, unit test dan pemeriksaan kode Windows dapat dijalankan tanpa menjalankan UI:
 

@@ -159,10 +159,16 @@ impl Settings {
     }
 
     pub fn load(path: &Path) -> Self {
-        fs::read(path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default()
+        Self::load_checked(path).unwrap_or_default()
+    }
+
+    pub fn load_checked(path: &Path) -> io::Result<Self> {
+        match fs::read(path) {
+            Ok(bytes) => serde_json::from_slice(&bytes)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error)),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Self::default()),
+            Err(error) => Err(error),
+        }
     }
 
     pub fn save(&self, path: &Path) -> io::Result<()> {
@@ -265,5 +271,21 @@ mod tests {
         assert_eq!(settings.pins[0].label, "Editor");
         assert!(settings.unpin(0));
         assert_eq!(settings.pins.len(), 1);
+    }
+
+    #[test]
+    fn invalid_settings_are_reported_before_taskbar_changes() {
+        let path = std::env::temp_dir().join(format!(
+            "thedock-invalid-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(&path, b"{invalid").unwrap();
+        let error = Settings::load_checked(&path).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        std::fs::remove_file(path).unwrap();
     }
 }

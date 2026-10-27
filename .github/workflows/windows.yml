@@ -27,3 +27,4 @@ jobs:
           path: |
             target/release/thedock.exe
             target/release/thedock-watchdog.exe
+            target/release/thedock-tray-probe.exe
